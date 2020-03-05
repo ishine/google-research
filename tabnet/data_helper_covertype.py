@@ -15,7 +15,7 @@
 
 """Data helper function for the Forest Covertype dataset."""
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # Dataset size
 # N_TRAIN_SAMPLES = 309871
@@ -57,7 +57,7 @@ DEFAULTS = ([[0] for col in INT_COLUMNS] + [[""] for col in BOOL_COLUMNS] +
             [[-1]])
 
 FEATURE_COLUMNS = (
-    INT_COLUMNS + BOOL_COLUMNS + STR_COLUMNS + FLOAT_COLUMNS + [LABEL_COLUMN])
+    INT_COLUMNS + BOOL_COLUMNS + STR_COLUMNS + FLOAT_COLUMNS)
 ALL_COLUMNS = FEATURE_COLUMNS + [LABEL_COLUMN]
 
 
