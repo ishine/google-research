@@ -23,11 +23,11 @@
 
 #include "algorithm.h"
 #include "task_util.h"
-#include "task.proto.h"
+#include "task.pb.h"
 #include "definitions.h"
-#include "instruction.proto.h"
+#include "instruction.pb.h"
 #include "evaluator.h"
-#include "experiment.proto.h"
+#include "experiment.pb.h"
 #include "experiment_util.h"
 #include "fec_cache.h"
 #include "generator.h"
@@ -37,6 +37,7 @@
 #include "train_budget.h"
 #include "google/protobuf/text_format.h"
 #include "absl/flags/flag.h"
+#include "absl/flags/parse.h"
 #include "absl/time/time.h"
 
 typedef automl_zero::IntegerT IntegerT;
@@ -168,10 +169,10 @@ void run() {
     // Run one experiment.
     cout << "Running evolution experiment (on the T_search tasks)..." << endl;
     regularized_evolution.Init();
-    const IntegerT remaining_individuals =
-        experiment_spec.max_individuals() -
-        regularized_evolution.NumIndividuals();
-    regularized_evolution.Run(remaining_individuals, kUnlimitedTime);
+    const IntegerT remaining_train_steps =
+        experiment_spec.max_train_steps() -
+        regularized_evolution.NumTrainSteps();
+    regularized_evolution.Run(remaining_train_steps, kUnlimitedTime);
     cout << "Experiment done. Retrieving candidate algorithm." << endl;
 
     // Extract best algorithm based on T_search.
@@ -225,6 +226,7 @@ void run() {
   }
 
   // Do a final evaluation on unseen tasks.
+  cout << endl;
   cout << "Final evaluation of best algorithm "
        << "(on unseen tasks)..." << endl;
   const auto final_tasks =
@@ -250,7 +252,7 @@ void run() {
 }  // namespace automl_zero
 
 int main(int argc, char** argv) {
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
+  absl::ParseCommandLine(argc, argv);
   automl_zero::run();
   return 0;
 }

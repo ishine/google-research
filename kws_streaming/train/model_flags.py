@@ -15,11 +15,8 @@
 
 """Model/data settings manipulation."""
 
-import math
 import os
-import kws_streaming.data.input_data as input_data
-from kws_streaming.layers.modes import Modes
-from kws_streaming.models import utils
+from kws_streaming.data import input_data
 
 MS_PER_SECOND = 1000  # milliseconds in 1 second
 
@@ -51,38 +48,17 @@ def update_flags(flags):
     spectrogram_length = 0
   else:
     spectrogram_length = 1 + int(length_minus_window / window_stride_samples)
-  if flags.preprocess == 'raw':
-    average_window_width = -1
-    fingerprint_width = desired_samples
-    spectrogram_length = 1
-  elif flags.preprocess == 'average':
-    fft_bin_count = 1 + (utils.next_power_of_two(window_size_samples) / 2)
-    average_window_width = int(
-        math.floor(fft_bin_count / flags.feature_bin_count))
-    fingerprint_width = int(
-        math.ceil(float(fft_bin_count) / average_window_width))
-  elif flags.preprocess == 'mfcc':
-    average_window_width = -1
-    fingerprint_width = flags.feature_bin_count
-  elif flags.preprocess == 'micro':
-    average_window_width = -1
-    fingerprint_width = flags.feature_bin_count
-  else:
-    raise ValueError('Unknown preprocess mode "%s" (should be "mfcc",'
-                     ' "average", or "micro")' % (flags.preprocess))
-
-  fingerprint_size = fingerprint_width * spectrogram_length
 
   upd_flags = flags
-  upd_flags.mode = Modes.TRAINING
   upd_flags.label_count = label_count
   upd_flags.desired_samples = desired_samples
   upd_flags.window_size_samples = window_size_samples
   upd_flags.window_stride_samples = window_stride_samples
   upd_flags.spectrogram_length = spectrogram_length
-  upd_flags.fingerprint_width = fingerprint_width
-  upd_flags.fingerprint_size = fingerprint_size
-  upd_flags.average_window_width = average_window_width
+  if upd_flags.fft_magnitude_squared in (0, 1):
+    upd_flags.fft_magnitude_squared = bool(upd_flags.fft_magnitude_squared)
+  else:
+    raise ValueError('Non boolean value %d' % upd_flags.fft_magnitude_squared)
 
   # summary logs for TensorBoard
   upd_flags.summaries_dir = os.path.join(flags.train_dir, 'logs/')

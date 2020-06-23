@@ -23,13 +23,12 @@
 #include <utility>
 
 #include "algorithm.h"
-#include "algorithm.proto.h"
+#include "algorithm.pb.h"
 #include "task_util.h"
 #include "definitions.h"
 #include "executor.h"
 #include "instruction.h"
 #include "random_generator.h"
-#include "absl/base/integral_types.h"
 #include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
 #include "absl/time/clock.h"
@@ -77,8 +76,7 @@ RegularizedEvolution::RegularizedEvolution(
       population_size_(population_size),
       algorithms_(population_size_, make_shared<Algorithm>()),
       fitnesses_(population_size_),
-      num_individuals_(0),
-      num_individuals_since_put_(0) {}
+      num_individuals_(0) {}
 
 IntegerT RegularizedEvolution::Init() {
   // Otherwise, initialize the population from scratch.
@@ -96,13 +94,14 @@ IntegerT RegularizedEvolution::Init() {
   return num_individuals_ - start_individuals;
 }
 
-IntegerT RegularizedEvolution::Run(
-    const IntegerT max_individuals, const IntegerT max_nanos) {
+IntegerT RegularizedEvolution::Run(const IntegerT max_train_steps,
+                                   const IntegerT max_nanos) {
   CHECK(initialized_) << "RegularizedEvolution not initialized."
                       << std::endl;
   const IntegerT start_nanos = GetCurrentTimeNanos();
-  const IntegerT start_individuals = num_individuals_;
-  while (num_individuals_ - start_individuals < max_individuals &&
+  const IntegerT start_train_steps = evaluator_->GetNumTrainStepsCompleted();
+  while (evaluator_->GetNumTrainStepsCompleted() - start_train_steps <
+             max_train_steps &&
          GetCurrentTimeNanos() - start_nanos < max_nanos) {
     vector<double>::iterator next_fitness_it = fitnesses_.begin();
     for (shared_ptr<const Algorithm>& next_algorithm : algorithms_) {
@@ -113,7 +112,7 @@ IntegerT RegularizedEvolution::Run(
     }
     MaybePrintProgress();
   }
-  return num_individuals_ - start_individuals;
+  return evaluator_->GetNumTrainStepsCompleted() - start_train_steps;
 }
 
 IntegerT RegularizedEvolution::NumIndividuals() const {
@@ -122,6 +121,10 @@ IntegerT RegularizedEvolution::NumIndividuals() const {
 
 IntegerT RegularizedEvolution::PopulationSize() const {
   return population_size_;
+}
+
+IntegerT RegularizedEvolution::NumTrainSteps() const {
+  return evaluator_->GetNumTrainStepsCompleted();
 }
 
 shared_ptr<const Algorithm> RegularizedEvolution::Get(
@@ -185,7 +188,6 @@ void RegularizedEvolution::InitAlgorithm(
 
 double RegularizedEvolution::Execute(shared_ptr<const Algorithm> algorithm) {
   ++num_individuals_;
-  ++num_individuals_since_put_;
   epoch_secs_ = GetCurrentTimeNanos() / kNanosPerSecond;
   const double fitness = evaluator_->Evaluate(*algorithm);
   return fitness;

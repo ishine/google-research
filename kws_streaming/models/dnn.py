@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """DNN model with Mel spectrum and fully connected layers."""
-
+from kws_streaming.layers import modes
 from kws_streaming.layers import speech_features
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.stream import Stream
@@ -24,10 +24,10 @@ from kws_streaming.models.utils import parse
 def model_parameters(parser_nn):
   """DNN model parameters."""
   parser_nn.add_argument(
-      '--units1', type=str, default='32',
+      '--units1', type=str, default='64,128',
       help='List of units in the first set of hidden layers',)
   parser_nn.add_argument(
-      '--act1', type=str, default="'relu'",
+      '--act1', type=str, default="'relu','relu'",
       help='List of activation functions of the first set hidden layers',)
   parser_nn.add_argument(
       '--pool_size', type=int, default=2,
@@ -39,10 +39,10 @@ def model_parameters(parser_nn):
       '--dropout1', type=float, default=0.1,
       help='Percentage of data dropped',)
   parser_nn.add_argument(
-      '--units2', type=str, default='256,256',
+      '--units2', type=str, default='128,256',
       help='List of units in the second set of hidden layers',)
   parser_nn.add_argument(
-      '--act2', type=str, default="'relu','relu'",
+      '--act2', type=str, default="'linear','relu'",
       help='List of activation functions of the second set of hidden layers',)
 
 
@@ -52,8 +52,8 @@ def model(flags):
   It is based on paper (with added pooling):
   SMALL-FOOTPRINT KEYWORD SPOTTING USING DEEP NEURAL NETWORKS
   https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/42537.pdf
-  Hello Edge: Keyword Spotting on Microcontrollers
-  https://arxiv.org/pdf/1711.07128.pdf
+  Model topology is similar with "Hello Edge: Keyword Spotting on
+  Microcontrollers" https://arxiv.org/pdf/1711.07128.pdf
   Args:
     flags: data/model parameters
 
@@ -62,22 +62,15 @@ def model(flags):
   """
 
   input_audio = tf.keras.layers.Input(
-      shape=(flags.desired_samples,), batch_size=flags.batch_size)
+      shape=modes.get_input_data_shape(flags, modes.Modes.TRAINING),
+      batch_size=flags.batch_size)
+  net = input_audio
 
-  net = speech_features.SpeechFeatures(
-      frame_size_ms=flags.window_size_ms,
-      frame_step_ms=flags.window_stride_ms,
-      sample_rate=flags.sample_rate,
-      use_tf_fft=flags.use_tf_fft,
-      preemph=flags.preemph,
-      window_type=flags.window_type,
-      mel_num_bins=flags.mel_num_bins,
-      mel_lower_edge_hertz=flags.mel_lower_edge_hertz,
-      mel_upper_edge_hertz=flags.mel_upper_edge_hertz,
-      mel_non_zero_only=flags.mel_non_zero_only,
-      fft_magnitude_squared=flags.fft_magnitude_squared,
-      dct_num_features=flags.dct_num_features)(
-          input_audio)
+  if flags.preprocess == 'raw':
+    # it is a self contained model, user need to feed raw audio only
+    net = speech_features.SpeechFeatures(
+        speech_features.SpeechFeatures.get_params(flags))(
+            net)
 
   for units, activation in zip(parse(flags.units1), parse(flags.act1)):
     net = tf.keras.layers.Dense(units=units, activation=activation)(net)

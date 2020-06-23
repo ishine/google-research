@@ -21,14 +21,12 @@
 #include "algorithm_test_util.h"
 #include "task_util.h"
 #include "definitions.h"
-#include "instruction.proto.h"
-#include "experiment.proto.h"
-#include "generator_test_util.h"
+#include "instruction.pb.h"
+#include "experiment.pb.h"
 #include "mutator.h"
-#include "mutator_test_util.h"
 #include "random_generator.h"
 #include "test_util.h"
-#include "testing/base/public/gmock.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
@@ -53,6 +51,8 @@ constexpr double kFitnessTolerance = 0.0001;
 constexpr IntegerT kNanosPerMilli = 1000000;
 constexpr IntegerT kNumTasksForSearch = 2;
 constexpr IntegerT kNumTrainExamplesForSearch = 1000;
+constexpr IntegerT kNumTrainStepsPerIndividual =
+    kNumTasksForSearch * kNumTrainExamplesForSearch;
 constexpr IntegerT kNumValidExamplesForSearch = 100;
 constexpr double kLargeMaxAbsError = 1000000000.0;
 
@@ -68,7 +68,7 @@ TEST(doubleTest, Requirement) {
 TEST(RegularizedEvolutionTest, Runs) {
   mt19937 bit_gen(kEvolutionSeed);
   RandomGenerator rand_gen(&bit_gen);
-  Generator generator = SimpleGenerator();
+  Generator generator;
   const auto task_collection = ParseTextFormat<TaskCollection>(
       StrCat("tasks { "
              "  scalar_2layer_nn_regression_task {} "
@@ -88,7 +88,7 @@ TEST(RegularizedEvolutionTest, Runs) {
                       nullptr,  // functional_cache
                       nullptr,  // train_budget
                       kLargeMaxAbsError);
-  Mutator mutator = SimpleMutator();
+  Mutator mutator;
   RegularizedEvolution regularized_evolution(
       &rand_gen,
       5,  // population_size
@@ -98,13 +98,13 @@ TEST(RegularizedEvolutionTest, Runs) {
       &evaluator,
       &mutator);
   regularized_evolution.Init();
-  regularized_evolution.Run(20, kUnlimitedTime);
+  regularized_evolution.Run(20 * kNumTrainStepsPerIndividual, kUnlimitedTime);
 }
 
 TEST(RegularizedEvolutionTest, TimesCorrectly) {
   mt19937 bit_gen(kEvolutionSeed);
   RandomGenerator rand_gen(&bit_gen);
-  Generator generator = SimpleGenerator();
+  Generator generator;
   const auto task_collection = ParseTextFormat<TaskCollection>(
       StrCat("tasks { "
              "  scalar_2layer_nn_regression_task {} "
@@ -124,7 +124,7 @@ TEST(RegularizedEvolutionTest, TimesCorrectly) {
                       nullptr,  // functional_cache
                       nullptr,  // train_budget
                       kLargeMaxAbsError);
-  Mutator mutator = SimpleMutator();
+  Mutator mutator;
   RegularizedEvolution regularized_evolution(
       &rand_gen,
       5,  // population_size
@@ -136,7 +136,8 @@ TEST(RegularizedEvolutionTest, TimesCorrectly) {
   regularized_evolution.Init();
   const IntegerT one_second = 1000000000;
   IntegerT start_nanos = GetCurrentTimeNanos();
-  regularized_evolution.Run(kUnlimitedIndividuals, one_second);
+  regularized_evolution.Run(kUnlimitedIndividuals * kNumTrainStepsPerIndividual,
+                            one_second);
   IntegerT elapsed_time = GetCurrentTimeNanos() - start_nanos;
   EXPECT_GE(elapsed_time, one_second);
   EXPECT_LT(elapsed_time, 2 * one_second);
@@ -145,7 +146,7 @@ TEST(RegularizedEvolutionTest, TimesCorrectly) {
 TEST(RegularizedEvolutionTest, CountsCorrectly) {
   mt19937 bit_gen(kEvolutionSeed);
   RandomGenerator rand_gen(&bit_gen);
-  Generator generator = SimpleGenerator();
+  Generator generator;
   const auto task_collection = ParseTextFormat<TaskCollection>(
       StrCat("tasks { "
              "  scalar_2layer_nn_regression_task {} "
@@ -166,7 +167,7 @@ TEST(RegularizedEvolutionTest, CountsCorrectly) {
                       nullptr,  // functional_cache
                       nullptr,  // train_budget
                       kLargeMaxAbsError);
-  Mutator mutator = SimpleMutator();
+  Mutator mutator;
   RegularizedEvolution regularized_evolution(
       &rand_gen,
       5,  // population_size
@@ -175,17 +176,29 @@ TEST(RegularizedEvolutionTest, CountsCorrectly) {
       &generator,
       &evaluator,
       &mutator);
-  EXPECT_EQ(regularized_evolution.NumIndividuals(), 0);
-  EXPECT_EQ(regularized_evolution.NumIndividuals(), 0);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(), 0);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(), 0);
   EXPECT_EQ(regularized_evolution.Init(), 5);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(),
+            5 * kNumTrainStepsPerIndividual);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(),
+            5 * kNumTrainStepsPerIndividual);
   EXPECT_EQ(regularized_evolution.NumIndividuals(), 5);
   EXPECT_EQ(regularized_evolution.NumIndividuals(), 5);
-  EXPECT_EQ(regularized_evolution.Run(10, kUnlimitedTime), 10);
-  EXPECT_EQ(regularized_evolution.NumIndividuals(), 15);
-  EXPECT_EQ(regularized_evolution.NumIndividuals(), 15);
-  EXPECT_EQ(regularized_evolution.Run(10, kUnlimitedTime), 10);
-  EXPECT_EQ(regularized_evolution.NumIndividuals(), 25);
-  EXPECT_EQ(regularized_evolution.NumIndividuals(), 25);
+  EXPECT_EQ(regularized_evolution.Run(10 * kNumTrainStepsPerIndividual,
+                                      kUnlimitedTime),
+            10 * kNumTrainStepsPerIndividual);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(),
+            15 * kNumTrainStepsPerIndividual);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(),
+            15 * kNumTrainStepsPerIndividual);
+  EXPECT_EQ(regularized_evolution.Run(10 * kNumTrainStepsPerIndividual,
+                                      kUnlimitedTime),
+            10 * kNumTrainStepsPerIndividual);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(),
+            25 * kNumTrainStepsPerIndividual);
+  EXPECT_EQ(regularized_evolution.NumTrainSteps(),
+            25 * kNumTrainStepsPerIndividual);
 }
 
 bool PopulationsEq(

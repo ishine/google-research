@@ -18,13 +18,47 @@
 
 import ast
 import os.path
+from kws_streaming.layers import modes
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.compat import tf1
-from kws_streaming.layers.modes import Modes
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.python.keras import models
-from tensorflow.python.keras.engine import network
+from tensorflow.python.keras.engine import functional
 # pylint: enable=g-direct-tensorflow-import
+
+
+def conv2d_bn(x,
+              filters,
+              kernel_size,
+              padding='same',
+              strides=(1, 1),
+              activation='relu',
+              use_bias=False,
+              scale=False):
+  """Utility function to apply conv + BN.
+
+  Arguments:
+    x: input tensor.
+    filters: filters in `Conv2D`.
+    kernel_size: size of convolution kernel.
+    padding: padding mode in `Conv2D`.
+    strides: strides in `Conv2D`.
+    activation: activation function applied in the end.
+    use_bias: use bias for convolution.
+    scale: scale batch normalization.
+
+  Returns:
+    Output tensor after applying `Conv2D` and `BatchNormalization`.
+  """
+
+  x = tf.keras.layers.Conv2D(
+      filters, kernel_size,
+      strides=strides,
+      padding=padding,
+      use_bias=use_bias)(x)
+  x = tf.keras.layers.BatchNormalization(scale=scale)(x)
+  x = tf.keras.layers.Activation(activation)(x)
+  return x
 
 
 def save_model_summary(model, path, file_name='model_summary.txt'):
@@ -52,7 +86,7 @@ def _set_mode(model, mode):
       # with any mode of inference - training is False
     if 'training' in config:
       model.layers[i].training = False
-    if mode == Modes.NON_STREAM_INFERENCE:
+    if mode == modes.Modes.NON_STREAM_INFERENCE:
       if 'unroll' in config:
         model.layers[i].unroll = True
   return model
@@ -91,7 +125,7 @@ def _clone_model(model, input_tensors):
 
   # Reconstruct model from the config, using the cloned layers.
   input_tensors, output_tensors, created_layers = (
-      network.reconstruct_from_config(
+      functional.reconstruct_from_config(
           model_config, created_layers=created_layers))
 
   new_model = tf.keras.Model(input_tensors, output_tensors, name=model.name)
@@ -177,7 +211,7 @@ def convert_to_inference_model(model, input_tensors, mode):
   Args:
       model: Instance of `Model`.
       input_tensors: list of input tensors to build the model upon.
-      mode: is defined by Modes
+      mode: is defined by modes.Modes
 
   Returns:
       An instance of streaming inference `Model` reproducing the behavior
@@ -208,9 +242,9 @@ def convert_to_inference_model(model, input_tensors, mode):
     model = _set_mode(model, mode)
     new_model = _clone_model(model, input_tensors)
 
-  if mode == Modes.STREAM_INTERNAL_STATE_INFERENCE:
+  if mode == modes.Modes.STREAM_INTERNAL_STATE_INFERENCE:
     return _copy_weights(new_model, model)
-  elif mode == Modes.STREAM_EXTERNAL_STATE_INFERENCE:
+  elif mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
     input_states, output_states = _get_input_output_states(new_model)
     all_inputs = new_model.inputs + input_states
     all_outputs = new_model.outputs + output_states
@@ -221,7 +255,7 @@ def convert_to_inference_model(model, input_tensors, mode):
     # non streaming model so we can use set_weights directly
     new_streaming_model.set_weights(model.get_weights())
     return new_streaming_model
-  elif mode == Modes.NON_STREAM_INFERENCE:
+  elif mode == modes.Modes.NON_STREAM_INFERENCE:
     new_model.set_weights(model.get_weights())
     return new_model
   else:
@@ -241,15 +275,10 @@ def to_streaming_inference(model_non_stream, flags, mode):
     Keras inference model of inference_type
   """
   tf.keras.backend.set_learning_phase(0)
-  if mode == Modes.NON_STREAM_INFERENCE:
-    # in non streaming mode we use all data
-    data_size = flags.desired_samples
-  else:
-    # in streaming mode we receive data in a stream packet by packet
-    data_size = flags.window_stride_samples
+  input_data_shape = modes.get_input_data_shape(flags, mode)
   input_tensors = [
       tf.keras.layers.Input(
-          shape=(data_size,), batch_size=1, name='input_audio')
+          shape=input_data_shape, batch_size=1, name='input_audio')
   ]
   model_inference = convert_to_inference_model(model_non_stream, input_tensors,
                                                mode)
@@ -259,8 +288,9 @@ def to_streaming_inference(model_non_stream, flags, mode):
 def model_to_tflite(sess,
                     model_non_stream,
                     flags,
-                    mode=Modes.STREAM_EXTERNAL_STATE_INFERENCE,
-                    save_model_path=None):
+                    mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
+                    save_model_path=None,
+                    optimizations=None):
   """Convert non streaming model to tflite inference model.
 
   In this case inference graph will be stateless.
@@ -274,12 +304,13 @@ def model_to_tflite(sess,
     mode: inference mode it can be streaming with external state or non
       streaming
     save_model_path: path to save intermediate model summary
+    optimizations: list of optimization options
 
   Returns:
     tflite model
   """
-  if mode not in (Modes.STREAM_EXTERNAL_STATE_INFERENCE,
-                  Modes.NON_STREAM_INFERENCE):
+  if mode not in (modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
+                  modes.Modes.NON_STREAM_INFERENCE):
     raise ValueError('mode %s is not supported ' % mode)
   # convert non streaming Keras model to
   # Keras inference model (non streaming or streaming)
@@ -292,10 +323,14 @@ def model_to_tflite(sess,
   converter = tf1.lite.TFLiteConverter.from_session(
       sess, model_stateless_stream.inputs, model_stateless_stream.outputs)
   converter.inference_type = tf1.lite.constants.FLOAT
-  converter.target_spec.supported_ops = [
-      tf1.lite.OpsSet.TFLITE_BUILTINS, tf1.lite.OpsSet.SELECT_TF_OPS
-  ]
+
+  # this will enable audio_spectrogram and mfcc in TFLite
+  converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+  converter.allow_custom_ops = True
+
   converter.experimental_new_converter = True
+  if optimizations:
+    converter.optimizations = optimizations
   tflite_model = converter.convert()
   return tflite_model
 
@@ -308,7 +343,7 @@ TensorSpec = tf.TensorSpec
 def model_to_saved(model_non_stream,
                    flags,
                    save_model_path,
-                   mode=Modes.STREAM_INTERNAL_STATE_INFERENCE):
+                   mode=modes.Modes.STREAM_INTERNAL_STATE_INFERENCE):
   """Convert Keras model to SavedModel.
 
   Depending on mode:
@@ -323,11 +358,11 @@ def model_to_saved(model_non_stream,
       streaming
   """
 
-  if mode not in (Modes.STREAM_INTERNAL_STATE_INFERENCE,
-                  Modes.NON_STREAM_INFERENCE):
+  if mode not in (modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
+                  modes.Modes.NON_STREAM_INFERENCE):
     raise ValueError('mode %s is not supported ' % mode)
 
-  if mode == Modes.NON_STREAM_INFERENCE:
+  if mode == modes.Modes.NON_STREAM_INFERENCE:
     model = model_non_stream
   else:
     # convert non streaming Keras model to Keras streaming model, internal state

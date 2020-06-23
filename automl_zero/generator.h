@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_GENERATOR_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_GENERATOR_H_
+#ifndef GENERATOR_H_
+#define GENERATOR_H_
 
 #include <memory>
 #include <random>
 
 #include "algorithm.h"
 #include "definitions.h"
-#include "instruction.proto.h"
-#include "generator.proto.h"
+#include "instruction.pb.h"
+#include "generator.pb.h"
 #include "instruction.h"
 #include "randomizer.h"
 
@@ -90,11 +90,11 @@ class Generator {
       kUnitTestNeuralNetNoBiasNoGradientFirstLayerWeightsAddress = 0;
   Algorithm UnitTestNeuralNetNoBiasNoGradient(const double learning_rate);
 
- private:
-  friend Generator SimpleGenerator();
-
-  // Used to create a simple generator for tests. See SimpleGenerator.
+  // Used to create a simple generator for tests. See Generator.
   Generator();
+
+ private:
+  friend Generator Generator();
 
   const HardcodedAlgorithmID init_model_;
   const IntegerT setup_size_init_;
@@ -112,4 +112,4 @@ class Generator {
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_GENERATOR_H_
+#endif  // GENERATOR_H_

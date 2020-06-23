@@ -30,6 +30,8 @@ import numpy as np
 from six.moves import urllib
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow.compat.v1 as tf
+from kws_streaming.data import data_utils
+from kws_streaming.layers import modes
 
 # pylint: disable=g-direct-tensorflow-import
 # below ops are on a depreciation path in tf, so we temporarily disable pylint
@@ -57,6 +59,7 @@ UNKNOWN_WORD_LABEL = '_unknown_'
 UNKNOWN_WORD_INDEX = 1
 BACKGROUND_NOISE_DIR_NAME = '_background_noise_'
 RANDOM_SEED = 59185
+MAX_ABS_INT16 = 32768
 
 
 def prepare_words_list(wanted_words, split_data):
@@ -472,46 +475,28 @@ class AudioProcessor(object):
       wav_loader = io_ops.read_file(self.wav_filename_placeholder_)
       wav_decoder = tf.audio.decode_wav(
           wav_loader, desired_channels=1, desired_samples=desired_samples)
+
       # Allow the audio sample's volume to be adjusted.
       self.foreground_volume_placeholder_ = tf.placeholder(
           tf.float32, [], name='foreground_volume')
       # signal resampling to generate more training data
       # it will stretch or squeeze input signal proportinally to:
       self.foreground_resampling_placeholder_ = tf.placeholder(tf.float32, [])
+      wav_resampled = data_utils.resample(
+          wav_decoder.audio, self.foreground_resampling_placeholder_,
+          desired_samples)
+      scaled_foreground = tf.multiply(wav_resampled,
+                                      self.foreground_volume_placeholder_)
 
-      if self.foreground_resampling_placeholder_ != 1.0:
-        image = tf.expand_dims(wav_decoder.audio, 0)
-        image = tf.expand_dims(image, 2)
-        shape = tf.shape(wav_decoder.audio)
-        image_resized = tf.image.resize(
-            images=image,
-            size=(tf.cast((tf.cast(shape[0], tf.float32) *
-                           self.foreground_resampling_placeholder_),
-                          tf.int32), 1),
-            preserve_aspect_ratio=False)
-        image_resized_cropped = tf.image.resize_with_crop_or_pad(
-            image_resized,
-            target_height=desired_samples,
-            target_width=1,
-        )
-        image_resized_cropped = tf.squeeze(image_resized_cropped, axis=[0, 3])
-        scaled_foreground = tf.multiply(image_resized_cropped,
-                                        self.foreground_volume_placeholder_)
-      else:
-        scaled_foreground = tf.multiply(wav_decoder.audio,
-                                        self.foreground_volume_placeholder_)
       # Shift the sample's start position, and pad any gaps with zeros.
       self.time_shift_padding_placeholder_ = tf.placeholder(
           tf.int32, [2, 2], name='time_shift_padding')
       self.time_shift_offset_placeholder_ = tf.placeholder(
           tf.int32, [2], name='time_shift_offset')
-      padded_foreground = tf.pad(
-          tensor=scaled_foreground,
-          paddings=self.time_shift_padding_placeholder_,
-          mode='CONSTANT')
-      sliced_foreground = tf.slice(padded_foreground,
-                                   self.time_shift_offset_placeholder_,
-                                   [desired_samples, -1])
+      sliced_foreground = data_utils.shift_in_time(
+          scaled_foreground, self.time_shift_padding_placeholder_,
+          self.time_shift_offset_placeholder_, desired_samples)
+
       # Mix in background noise.
       self.background_data_placeholder_ = tf.placeholder(
           tf.float32, [desired_samples, 1], name='background_data')
@@ -523,77 +508,70 @@ class AudioProcessor(object):
       background_clamp = tf.clip_by_value(background_add, -1.0, 1.0)
 
       if flags.preprocess == 'raw':
-        # return raw audio
-        self.output_ = background_clamp
-        tf.summary.image(
-            'input_audio',
-            tf.expand_dims(tf.expand_dims(background_clamp, -1), -1),
-            max_outputs=1)
-      else:
-        # Run the spectrogram and MFCC ops to get a 2D audio 'fingerprint'
+        # background_clamp dims: [time, channels]
+        # remove channel dim
+        self.output_ = tf.squeeze(background_clamp, axis=1)
+      # below options are for backward compatibility with previous
+      # version of hotword detection on microcontrollers
+      # in this case audio feature extraction is done separately from
+      # neural net and user will have to manage it.
+      elif flags.preprocess == 'mfcc':
+        # Run the spectrogram and MFCC ops to get a 2D audio: Short-time FFTs
+        # background_clamp dims: [time, channels]
         spectrogram = audio_ops.audio_spectrogram(
             background_clamp,
             window_size=flags.window_size_samples,
             stride=flags.window_stride_samples,
-            magnitude_squared=True)
-        tf.summary.image(
-            'spectrogram', tf.expand_dims(spectrogram, -1), max_outputs=1)
-        # The number of buckets in each FFT row in the spectrogram will depend
-        # on how many input samples there are in each window. This can be quite
-        # large, with a 160 sample window producing 127 buckets for example. We
-        # don't need this level of detail for classification, so we often want
-        # to shrink them down to produce a smaller result. That's what this
-        # section implements. One method is to use average pooling to merge
-        # adjacent buckets, but a more sophisticated approach is to apply the
-        # MFCC algorithm to shrink the representation.
-        if flags.preprocess == 'average':
-          self.output_ = tf.nn.pool(
-              input=tf.expand_dims(spectrogram, -1),
-              window_shape=[1, flags.average_window_width],
-              strides=[1, flags.average_window_width],
-              pooling_type='AVG',
-              padding='SAME')
-          tf.summary.image('shrunk_spectrogram', self.output_, max_outputs=1)
-        elif flags.preprocess == 'mfcc':
-          self.output_ = audio_ops.mfcc(
-              spectrogram,
-              wav_decoder.sample_rate,
-              dct_coefficient_count=flags.fingerprint_width)
-          tf.summary.image(
-              'mfcc', tf.expand_dims(self.output_, -1), max_outputs=1)
-        elif flags.preprocess == 'micro':
-          if not frontend_op:
-            raise Exception(
-                'Micro frontend op is currently not available when running'
-                ' TensorFlow directly from Python, you need to build and run'
-                ' through Bazel')
-          sample_rate = flags.sample_rate
-          window_size_ms = (flags.window_size_samples * 1000) / sample_rate
-          window_step_ms = (flags.window_stride_samples * 1000) / sample_rate
-          int16_input = tf.cast(tf.multiply(background_clamp, 32768), tf.int16)
-          micro_frontend = frontend_op.audio_microfrontend(
-              int16_input,
-              sample_rate=sample_rate,
-              window_size=window_size_ms,
-              window_step=window_step_ms,
-              num_channels=flags.fingerprint_width,
-              out_scale=1,
-              out_type=tf.float32)
-          self.output_ = tf.multiply(micro_frontend, (10.0 / 256.0))
-          tf.summary.image(
-              'micro',
-              tf.expand_dims(tf.expand_dims(self.output_, -1), 0),
-              max_outputs=1)
-        else:
-          raise ValueError('Unknown preprocess mode "%s" (should be "mfcc", '
-                           ' "average", or "micro")' % (flags.preprocess))
+            magnitude_squared=flags.fft_magnitude_squared)
+        # spectrogram: [channels/batch, frames, fft_feature]
 
-      # Merge all the summaries and write them out to /tmp/retrain_logs (by
-      # default)
-      self.merged_summaries_ = tf.summary.merge_all(scope='data')
-      if flags.summaries_dir:
-        self.summary_writer_ = tf.summary.FileWriter(
-            flags.summaries_dir + '/data', tf.get_default_graph())
+        # extract mfcc features from spectrogram by audio_ops.mfcc:
+        # 1 Input is spectrogram frames.
+        # 2 Weighted spectrogram into bands using a triangular mel filterbank
+        # 3 Logarithmic scaling
+        # 4 Discrete cosine transform (DCT), return lowest dct_coefficient_count
+        mfcc = audio_ops.mfcc(
+            spectrogram=spectrogram,
+            sample_rate=flags.sample_rate,
+            upper_frequency_limit=flags.mel_upper_edge_hertz,
+            lower_frequency_limit=flags.mel_lower_edge_hertz,
+            filterbank_channel_count=flags.mel_num_bins,
+            dct_coefficient_count=flags.dct_num_features)
+        # mfcc: [channels/batch, frames, dct_coefficient_count]
+        # remove channel dim
+        self.output_ = tf.squeeze(mfcc, axis=0)
+      elif flags.preprocess == 'micro':
+        if not frontend_op:
+          raise Exception(
+              'Micro frontend op is currently not available when running'
+              ' TensorFlow directly from Python, you need to build and run'
+              ' through Bazel')
+        int16_input = tf.cast(
+            tf.multiply(background_clamp, MAX_ABS_INT16), tf.int16)
+        # audio_microfrontend does:
+        # 1. A slicing window function of raw audio
+        # 2. Short-time FFTs
+        # 3. Filterbank calculations
+        # 4. Noise reduction
+        # 5. PCAN Auto Gain Control
+        # 6. Logarithmic scaling
+
+        # int16_input dims: [time, channels]
+        micro_frontend = frontend_op.audio_microfrontend(
+            int16_input,
+            sample_rate=flags.sample_rate,
+            window_size=flags.window_size_ms,
+            window_step=flags.window_stride_ms,
+            num_channels=flags.mel_num_bins,
+            upper_band_limit=flags.mel_upper_edge_hertz,
+            lower_band_limit=flags.mel_lower_edge_hertz,
+            out_scale=1,
+            out_type=tf.float32)
+        # int16_input dims: [frames, num_channels]
+        self.output_ = tf.multiply(micro_frontend, (10.0 / 256.0))
+      else:
+        raise ValueError('Unknown preprocess mode "%s" (should be "raw", '
+                         ' "mfcc", or "micro")' % (flags.preprocess))
 
   def set_size(self, mode):
     """Calculates the number of samples in the dataset partition.
@@ -608,7 +586,7 @@ class AudioProcessor(object):
 
   def get_data(self, how_many, offset, flags, background_frequency,
                background_volume_range, time_shift, mode, resample_offset,
-               sess):
+               volume_augmentation_offset, sess):
     """Gather samples from the data set, applying transformations as needed.
 
     When the mode is 'training', a random selection of samples will be returned,
@@ -629,6 +607,9 @@ class AudioProcessor(object):
         'testing'.
       resample_offset: resample input signal - stretch it or squeeze by 0..0.15
         If 0 - then not resampling.
+      volume_augmentation_offset: it is used for raw audio volume control.
+        During training volume multiplier will be sampled from
+        1.0 - volume_augmentation_offset ... 1.0 + volume_augmentation_offset
       sess: TensorFlow session that was active when processor was created.
 
     Returns:
@@ -644,7 +625,8 @@ class AudioProcessor(object):
     else:
       sample_count = max(0, min(how_many, len(candidates) - offset))
     # Data and labels will be populated and returned.
-    data = np.zeros((sample_count, flags.fingerprint_size))
+    input_data_shape = modes.get_input_data_shape(flags, modes.Modes.TRAINING)
+    data = np.zeros((sample_count,) + input_data_shape)
     labels = np.zeros(sample_count)
     desired_samples = flags.desired_samples
     use_background = self.background_data and (mode == 'training')
@@ -663,12 +645,8 @@ class AudioProcessor(object):
         time_shift_amount = np.random.randint(-time_shift, time_shift)
       else:
         time_shift_amount = 0
-      if time_shift_amount > 0:
-        time_shift_padding = [[time_shift_amount, 0], [0, 0]]
-        time_shift_offset = [0, 0]
-      else:
-        time_shift_padding = [[0, -time_shift_amount], [0, 0]]
-        time_shift_offset = [-time_shift_amount, 0]
+      (time_shift_padding, time_shift_offset
+      ) = data_utils.get_time_shift_pad_offset(time_shift_amount)
 
       resample = 1.0
       if mode == 'training' and resample_offset != 0.0:
@@ -707,12 +685,17 @@ class AudioProcessor(object):
       if sample['label'] == SILENCE_LABEL:
         input_dict[self.foreground_volume_placeholder_] = 0
       else:
-        input_dict[self.foreground_volume_placeholder_] = 1
+        foreground_volume = 1.0  # multiplier of audio signal
+        # in training mode produce audio data with different volume
+        if mode == 'training' and volume_augmentation_offset != 0.0:
+          foreground_volume = np.random.uniform(
+              low=foreground_volume - volume_augmentation_offset,
+              high=foreground_volume + volume_augmentation_offset)
+
+        input_dict[self.foreground_volume_placeholder_] = foreground_volume
       # Run the graph to produce the output audio.
-      summary, data_tensor = sess.run(
-          [self.merged_summaries_, self.output_], feed_dict=input_dict)
-      self.summary_writer_.add_summary(summary)
-      data[i - offset, :] = data_tensor.flatten()
+      data_tensor = sess.run(self.output_, feed_dict=input_dict)
+      data[i - offset, :] = data_tensor
       label_index = self.word_to_index[sample['label']]
       labels[i - offset] = label_index
     return data, labels

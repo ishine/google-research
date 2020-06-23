@@ -26,6 +26,7 @@ from absl.testing import parameterized
 import tensorflow.compat.v1 as tf
 from kws_streaming.train import model_flags
 from kws_streaming.train import train
+tf.disable_eager_execution()
 
 
 FLAGS = flags.FLAGS
@@ -131,8 +132,6 @@ class TrainTest(tf.test.TestCase, parameterized.TestCase):
             30,
         'window_stride_ms':
             20,
-        'feature_bin_count':
-            40,
         'preprocess':
             'raw',
         'split_data':
@@ -155,6 +154,8 @@ class TrainTest(tf.test.TestCase, parameterized.TestCase):
             '2',
         'learning_rate':
             '0.01',
+        'optimizer':
+            'adam',
         'quantize':
             False,
         'check_nans':
@@ -183,12 +184,16 @@ class TrainTest(tf.test.TestCase, parameterized.TestCase):
             1e-12,
         'resample':
             0.0,
+        'volume_resample':
+            0.0,
         'use_tf_fft':
             0,
         'preemph':
             0.0,
         'window_type':
             'hann',
+        'feature_type':
+            'mfcc_tf',
         'mel_num_bins':
             40,
         'mel_lower_edge_hertz':
@@ -215,6 +220,20 @@ class TrainTest(tf.test.TestCase, parameterized.TestCase):
             '256,256',
         'act2':
             "'relu','relu'",
+        'train':
+            0,
+        'lr_schedule':
+            'linear',
+        'use_spec_augment':
+            0,
+        'time_masks_number':
+            2,
+        'time_mask_max_size':
+            10,
+        'frequency_masks_number':
+            2,
+        'frequency_mask_max_size':
+            5,
     }
     return DictStruct(**dummy_flags)
 

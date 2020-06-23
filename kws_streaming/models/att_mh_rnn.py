@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """BiRNN model with multihead attention."""
+from kws_streaming.layers import modes
 from kws_streaming.layers import speech_features
 from kws_streaming.layers.compat import tf
 from kws_streaming.models.utils import parse
@@ -56,30 +57,30 @@ def model_parameters(parser_nn):
       '--heads',
       type=int,
       default=4,
-      help='number of heads in multihead attention',
+      help='Number of heads in multihead attention',
   )
   parser_nn.add_argument(
       '--rnn_layers',
       type=int,
       default=2,
-      help='number of RNN layers (each RNN is wrapped by Bidirectional)',
+      help='Number of RNN layers (each RNN is wrapped by Bidirectional)',
   )
   parser_nn.add_argument(
       '--rnn_type',
       type=str,
-      default='lstm',
+      default='gru',
       help='RNN type: it can be gru or lstm',
   )
   parser_nn.add_argument(
       '--rnn_units',
       type=int,
-      default=64,
-      help='units number in RNN cell',
+      default=128,
+      help='Units number in RNN cell',
   )
   parser_nn.add_argument(
       '--dropout1',
       type=float,
-      default=0.5,
+      default=0.2,
       help='Percentage of data dropped',
   )
   parser_nn.add_argument(
@@ -121,24 +122,18 @@ def model(flags):
   rnn = rnn_types[flags.rnn_type]
 
   input_audio = tf.keras.layers.Input(
-      shape=(flags.desired_samples,), batch_size=flags.batch_size)
+      shape=modes.get_input_data_shape(flags, modes.Modes.TRAINING),
+      batch_size=flags.batch_size)
+  net = input_audio
 
-  net = speech_features.SpeechFeatures(
-      frame_size_ms=flags.window_size_ms,
-      frame_step_ms=flags.window_stride_ms,
-      sample_rate=flags.sample_rate,
-      use_tf_fft=flags.use_tf_fft,
-      preemph=flags.preemph,
-      window_type=flags.window_type,
-      mel_num_bins=flags.mel_num_bins,
-      mel_lower_edge_hertz=flags.mel_lower_edge_hertz,
-      mel_upper_edge_hertz=flags.mel_upper_edge_hertz,
-      mel_non_zero_only=flags.mel_non_zero_only,
-      fft_magnitude_squared=flags.fft_magnitude_squared,
-      dct_num_features=flags.dct_num_features)(
-          input_audio)
+  if flags.preprocess == 'raw':
+    # it is a self contained model, user need to feed raw audio only
+    net = speech_features.SpeechFeatures(
+        speech_features.SpeechFeatures.get_params(flags))(
+            net)
 
   net = tf.keras.backend.expand_dims(net)
+
   for filters, kernel_size, activation, dilation_rate, strides in zip(
       parse(flags.cnn_filters), parse(flags.cnn_kernel_size),
       parse(flags.cnn_act), parse(flags.cnn_dilation_rate),
@@ -149,8 +144,10 @@ def model(flags):
         activation=activation,
         dilation_rate=dilation_rate,
         strides=strides,
-        padding='same')(
-            net)
+        padding='same',
+        kernel_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay),
+        bias_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay)
+        )(net)
     net = tf.keras.layers.BatchNormalization()(net)
 
   shape = net.shape
@@ -162,8 +159,12 @@ def model(flags):
   # dims: [batch, time, feature]
   for _ in range(flags.rnn_layers):
     net = tf.keras.layers.Bidirectional(
-        rnn(flags.rnn_units, return_sequences=True, unroll=True))(
-            net)
+        rnn(flags.rnn_units,
+            return_sequences=True,
+            unroll=True,
+            kernel_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay),
+            bias_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay)))(
+                net)
   feature_dim = net.shape[-1]
   middle = net.shape[1] // 2  # index of middle point of sequence
 
@@ -174,7 +175,11 @@ def model(flags):
   multiheads = []
   for _ in range(flags.heads):
     # apply one projection layer with the same dim as input feature
-    query = tf.keras.layers.Dense(feature_dim)(mid_feature)
+    query = tf.keras.layers.Dense(
+        feature_dim,
+        kernel_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay),
+        bias_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay))(
+            mid_feature)
 
     # attention weights [batch, time]
     att_weights = tf.keras.layers.Dot(axes=[1, 2])([query, net])
@@ -188,7 +193,10 @@ def model(flags):
   net = tf.keras.layers.Dropout(rate=flags.dropout1)(net)
 
   for units, activation in zip(parse(flags.units2), parse(flags.act2)):
-    net = tf.keras.layers.Dense(units=units, activation=activation)(net)
-
-  net = tf.keras.layers.Dense(units=flags.label_count)(net)
+    net = tf.keras.layers.Dense(
+        units=units,
+        activation=activation,
+        kernel_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay),
+        bias_regularizer=tf.keras.regularizers.l2(flags.l2_weight_decay))(
+            net)
   return tf.keras.Model(input_audio, net)

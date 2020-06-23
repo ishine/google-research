@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """GRU with Mel spectrum and fully connected layers."""
-
+from kws_streaming.layers import modes
 from kws_streaming.layers import speech_features
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.gru import GRU
@@ -27,20 +27,20 @@ def model_parameters(parser_nn):
   parser_nn.add_argument(
       '--gru_units',
       type=str,
-      default='512',
+      default='400',
       help='Output space dimensionality of gru layer',
   )
   parser_nn.add_argument(
       '--return_sequences',
       type=str,
-      default='1',
+      default='0',
       help='Whether to return the last output in the output sequence,'
       'or the full sequence',
   )
   parser_nn.add_argument(
       '--stateful',
       type=int,
-      default='0',
+      default='1',
       help='If True, the last state for each sample at index i'
       'in a batch will be used as initial state for the sample '
       'of index i in the following batch',
@@ -54,13 +54,13 @@ def model_parameters(parser_nn):
   parser_nn.add_argument(
       '--units1',
       type=str,
-      default='',
+      default='128,256',
       help='Number of units in the last set of hidden layers',
   )
   parser_nn.add_argument(
       '--act1',
       type=str,
-      default='',
+      default="'linear','relu'",
       help='Activation function of the last set of hidden layers',
   )
 
@@ -71,8 +71,8 @@ def model(flags):
   It is based on paper
   Convolutional Recurrent Neural Networks for Small-Footprint Keyword Spotting
   https://arxiv.org/pdf/1703.05390.pdf (with no conv layer)
-  Hello Edge: Keyword Spotting on Microcontrollers
-  https://arxiv.org/pdf/1711.07128.pdf
+  Model topology is similar with "Hello Edge: Keyword Spotting on
+  Microcontrollers" https://arxiv.org/pdf/1711.07128.pdf
   Args:
     flags: data/model parameters
 
@@ -80,22 +80,15 @@ def model(flags):
     Keras model for training
   """
   input_audio = tf.keras.layers.Input(
-      shape=(flags.desired_samples,), batch_size=flags.batch_size)
+      shape=modes.get_input_data_shape(flags, modes.Modes.TRAINING),
+      batch_size=flags.batch_size)
+  net = input_audio
 
-  net = speech_features.SpeechFeatures(
-      frame_size_ms=flags.window_size_ms,
-      frame_step_ms=flags.window_stride_ms,
-      sample_rate=flags.sample_rate,
-      use_tf_fft=flags.use_tf_fft,
-      preemph=flags.preemph,
-      window_type=flags.window_type,
-      mel_num_bins=flags.mel_num_bins,
-      mel_lower_edge_hertz=flags.mel_lower_edge_hertz,
-      mel_upper_edge_hertz=flags.mel_upper_edge_hertz,
-      mel_non_zero_only=flags.mel_non_zero_only,
-      fft_magnitude_squared=flags.fft_magnitude_squared,
-      dct_num_features=flags.dct_num_features)(
-          input_audio)
+  if flags.preprocess == 'raw':
+    # it is a self contained model, user need to feed raw audio only
+    net = speech_features.SpeechFeatures(
+        speech_features.SpeechFeatures.get_params(flags))(
+            net)
 
   for units, return_sequences in zip(
       parse(flags.gru_units), parse(flags.return_sequences)):

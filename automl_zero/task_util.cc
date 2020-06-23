@@ -23,18 +23,15 @@
 #include <utility>
 #include <vector>
 
-#include "file/base/path.h"
 #include "algorithm.h"
 #include "task.h"
-#include "task.proto.h"
+#include "task.pb.h"
 #include "definitions.h"
 #include "executor.h"
 #include "generator.h"
 #include "memory.h"
 #include "random_generator.h"
 #include "google/protobuf/text_format.h"
-#include "sstable/public/sstable.h"
-#include "absl/base/integral_types.h"
 #include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
@@ -137,18 +134,16 @@ void FillTasks(
 }
 
 void RandomizeTaskSeeds(TaskCollection* task_collection,
-                           const RandomSeedT seed) {
+                        const RandomSeedT seed) {
   RandomSeedT base_param_seed =
       HashMix(static_cast<RandomSeedT>(85652777), seed);
   mt19937 param_seed_bit_gen(base_param_seed);
-  RandomGenerator param_seed_gen = RandomGenerator(
-      &param_seed_bit_gen);
+  RandomGenerator param_seed_gen(&param_seed_bit_gen);
 
   RandomSeedT base_data_seed =
       HashMix(static_cast<RandomSeedT>(38272328), seed);
   mt19937 data_seed_bit_gen(base_data_seed);
-  RandomGenerator data_seed_gen = RandomGenerator(
-      &data_seed_bit_gen);
+  RandomGenerator data_seed_gen(&data_seed_bit_gen);
 
   for (TaskSpec& task : *task_collection->mutable_tasks()) {
     task.clear_param_seeds();

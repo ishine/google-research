@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_EXPERIMENT_UTIL_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_EXPERIMENT_UTIL_H_
+#ifndef EXPERIMENT_UTIL_H_
+#define EXPERIMENT_UTIL_H_
 
 #include <unordered_map>
 #include <unordered_set>
 
-#include "task.proto.h"
+#include "task.pb.h"
 #include "definitions.h"
-#include "instruction.proto.h"
+#include "instruction.pb.h"
 #include "google/protobuf/repeated_field.h"
 
 namespace automl_zero {
 
-std::vector<Op> ExtractOps(const proto2::RepeatedField<int>& ops_src);
+std::vector<Op> ExtractOps(const google::protobuf::RepeatedField<int>& ops_src);
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_EXPERIMENT_UTIL_H_
+#endif  // EXPERIMENT_UTIL_H_

@@ -6,7 +6,7 @@ The “Learned Optimizer List” is a sequential list of hyperparameters that ha
 
 Instead of worrying about finding a good hyperparameter search space for your problem, or complex hyperparameter search methods, we suggest you try using this list of hyperparameters instead.
 
-Wondering how this list is made? See our paper: "Using a thousand optimization tasks to learn hyperparameter search strategies" from [todo](todo).
+Wondering how this list is made? See our paper: ["Using a thousand optimization tasks to learn hyperparameter search strategies"](https://arxiv.org/abs/2002.11887) see [task\_set](https://github.com/google-research/google-research/tree/master/task_set).
 
 Contact Luke Metz (lmetz@google.com) for questions or issues.
 
@@ -20,7 +20,31 @@ The list is sorted, and we have found a small number of trials, e.g. under 10, s
 
 Try it out on your problem and let us know where it works, and where it doesn't!
 
-We provide full example usage in [examples/](https://github.com/google-research/google-research/tree/master/opt_list/examples) and code snippets below.
+We provide full example usage in [opt\_list/examples/](https://github.com/google-research/google-research/tree/master/opt_list/opt_list/examples) and code snippets below.
+For all examples we assume you are in the google\_research/opt\_list directory.
+
+### Remove your weight decay!
+
+For best performance, we recommend turning off any form l2 regularization or
+weight decay. These optimizers already manage this for you.
+
+
+## Installation
+Install via pip from github:
+
+```bash
+ pip install git+https://github.com/google-research/google-research.git#subdirectory=opt_list
+ ```
+
+ Alternatively, clone the repository and install the module from there.
+
+ ```bash
+git clone https://github.com/google-research/google-research.git
+cd google-research/opt_list/
+pip install -e .
+ ```
+
+## Examples
 
 ### PyTorch
 Full example: `python3 -m opt_list.examples.torch`
@@ -35,21 +59,6 @@ for i in range(training_steps):
   opt.zero_grad()
   loss.backward()
   opt.step()
-```
-
-### Jax
-Full example: `python3 -m opt_list.examples.jax`
-
-
-For now support Flax style optimizers. It should be fairly easy to port this code
-to work with other optimizer apis.
-```python
-from opt_list import jax_opt_list
-
-optimizer_def = jax_opt_list.optimizer_for_idx(idx=0, training_steps)
-optimizer = optimizer_def.create(model)
-for i in range(training_steps):
-  optimizer, loss = optimizer.optimize(loss_fn)
 ```
 
 ### TF V1
@@ -78,6 +87,54 @@ model.compile(loss='mse', optimizer=opt, metrics=[])
 
 for i in range(training_steps):
   model.train_on_batch(inp, target)
+```
+
+### Jax: Flax
+Full example: `python3 -m opt_list.examples.jax_flax`
+
+
+```python
+from opt_list import jax_flax_opt_list
+
+optimizer_def = jax_flax_opt_list.optimizer_for_idx(idx=0, training_steps)
+optimizer = optimizer_def.create(model)
+for i in range(training_steps):
+  optimizer, loss = optimizer.optimize(loss_fn)
+```
+
+
+### Jax: Optimizers (jax.experimental.optimizers)
+Full example: `python3 -m opt_list.examples.jax_optimizers`
+
+```python
+from opt_list import jax_optimizers_opt_list
+
+opt_init, opt_update, get_params = jax_optimizers_opt_list.optimizer_for_idx(
+    0, training_iters)
+opt_state = opt_init(params)
+
+for i in range(training_steps):
+  params = get_params(opt_state)
+  opt_state = opt_update(i, jax.grad(loss_fn)(params, batch), opt_state)
+```
+
+### Jax: Optix (jax.experimental.optix)
+Full example: `python3 -m opt_list.examples.jax_optix`
+
+For now, optix doesn't support AdamW style weight decay. As such this will NOT
+be a drop in replacement but will follow a similar API.
+
+```python
+from opt_list import jax_optix_opt_list
+
+opt = jax_optix_opt_list.optimizer_for_idx(idx=0, training_steps)
+opt_state = opt.init(params)
+
+for i in range(training_steps):
+  grads = jax.grad(loss_fn)(params, batch)
+  # Not opt.update! We need parameter values too!
+  updates, opt_state = opt.update_with_params(grads, params, opt_state)
+  params = optix.apply_updates(params, updates)
 ```
 
 

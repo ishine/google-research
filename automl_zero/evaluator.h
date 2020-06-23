@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_EVALUATOR_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_EVALUATOR_H_
+#ifndef EVALUATOR_H_
+#define EVALUATOR_H_
 
 #include <cstdio>
 #include <memory>
@@ -22,9 +22,9 @@
 
 #include "algorithm.h"
 #include "task.h"
-#include "task.proto.h"
+#include "task.pb.h"
 #include "definitions.h"
-#include "experiment.proto.h"
+#include "experiment.pb.h"
 #include "fec_cache.h"
 #include "random_generator.h"
 #include "train_budget.h"
@@ -61,6 +61,8 @@ class Evaluator {
   // Evaluates a Algorithm by executing it on the tasks. Returns the mean
   // fitness.
   double Evaluate(const Algorithm& algorithm);
+  // Get the number of train steps this evaluator has performed.
+  IntegerT GetNumTrainStepsCompleted() const;
 
  private:
   double Execute(const TaskInterface& task, IntegerT num_train_examples,
@@ -91,6 +93,7 @@ class Evaluator {
   std::shared_ptr<Algorithm> best_algorithm_;
 
   const double max_abs_error_;
+  IntegerT num_train_steps_completed_;
 };
 
 namespace internal {
@@ -103,4 +106,4 @@ double CombineFitnesses(
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_EVALUATOR_H_
+#endif  // EVALUATOR_H_

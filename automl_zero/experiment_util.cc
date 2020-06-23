@@ -19,7 +19,7 @@
 #include <memory>
 #include <ostream>
 
-#include "task.proto.h"
+#include "task.pb.h"
 #include "google/protobuf/repeated_field.h"
 #include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
@@ -27,7 +27,7 @@
 namespace automl_zero {
 
 using ::absl::make_unique;  // NOLINT
-using ::proto2::RepeatedField;
+using ::google::protobuf::RepeatedField;
 using ::std::endl;           // NOLINT
 using ::std::equal;          // NOLINT
 using ::std::function;       // NOLINT

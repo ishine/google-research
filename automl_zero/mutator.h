@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_MUTATOR_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_MUTATOR_H_
+#ifndef MUTATOR_H_
+#define MUTATOR_H_
 
 #include <memory>
 #include <random>
 
 #include "algorithm.h"
 #include "definitions.h"
-#include "instruction.proto.h"
-#include "mutator.proto.h"
+#include "instruction.pb.h"
+#include "mutator.pb.h"
 #include "random_generator.h"
 #include "randomizer.h"
-#include "testing/production_stub/public/gunit_prod.h"
+#include "gtest/gtest_prod.h"
 
 namespace automl_zero {
 
@@ -63,6 +63,9 @@ class Mutator {
   void Mutate(IntegerT num_mutations,
               std::shared_ptr<const Algorithm>* algorithm);
 
+  // Used to create a simple instance for tests.
+  Mutator();
+
  private:
   friend Mutator SimpleMutator();
   FRIEND_TEST(MutatorTest, InstructionIndexTest);
@@ -77,9 +80,6 @@ class Mutator {
   FRIEND_TEST(MutatorTest, RandomizeInstruction);
   FRIEND_TEST(MutatorTest, RandomizeComponentFunction);
   FRIEND_TEST(MutatorTest, RandomizeAlgorithm);
-
-  // Used to create a simple instance for tests.
-  Mutator();
 
   void MutateImpl(Algorithm* algorithm);
 
@@ -151,4 +151,4 @@ class Mutator {
 }  // namespace automl_zero
 
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_MUTATOR_H_
+#endif  // MUTATOR_H_

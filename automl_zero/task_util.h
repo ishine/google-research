@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_TASK_UTIL_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_TASK_UTIL_H_
+#ifndef TASK_UTIL_H_
+#define TASK_UTIL_H_
 
 #include <array>
+#include <fstream>
 #include <random>
 #include <type_traits>
 
-#include "file/base/path.h"
 #include "task.h"
-#include "task.proto.h"
+#include "task.pb.h"
 #include "definitions.h"
 #include "executor.h"
 #include "generator.h"
 #include "memory.h"
 #include "random_generator.h"
-#include "sstable/public/sstable.h"
 
 namespace automl_zero {
 
@@ -75,7 +74,7 @@ template <FeatureIndexT F>
 Task<F> GenerateTask(const std::string& task_spec_str) {
   TaskCollection task_collection;
   TaskSpec* task_spec = task_collection.add_tasks();
-  CHECK(proto2::TextFormat::ParseFromString(task_spec_str, task_spec));
+  CHECK(google::protobuf::TextFormat::ParseFromString(task_spec_str, task_spec));
   if (!task_spec->has_features_size()) {
     task_spec->set_features_size(F);
   }
@@ -124,6 +123,133 @@ void ClearAndResize(const IntegerT num_train_examples,
   ClearAndResizeImpl<F>::Call(num_train_examples, num_valid_examples, buffer);
 }
 
+template <FeatureIndexT F>
+struct ProjectedBinaryClassificationTaskCreator {
+  static void Create(EvalType eval_type,
+                     const ProjectedBinaryClassificationTask& task_spec,
+                     IntegerT num_train_examples, IntegerT num_valid_examples,
+                     IntegerT features_size, RandomSeedT data_seed,
+                     TaskBuffer<F>* buffer) {
+    ClearAndResize(num_train_examples, num_valid_examples, buffer);
+
+    std::string path;
+    CHECK(task_spec.has_path() & !task_spec.path().empty())
+        << "You have to specifiy the path to the data!" << std::endl;
+    path = task_spec.path();
+
+    IntegerT positive_class;
+    IntegerT negative_class;
+
+    if (task_spec.has_positive_class() &&
+        task_spec.has_negative_class()) {
+      positive_class = task_spec.positive_class();
+      negative_class = task_spec.negative_class();
+      IntegerT num_supported_data_seeds =
+          task_spec.max_supported_data_seed() -
+          task_spec.min_supported_data_seed();
+      data_seed = static_cast<RandomSeedT>(
+          task_spec.min_supported_data_seed() +
+          data_seed % num_supported_data_seeds);
+    } else if (!task_spec.has_positive_class() &&
+               !task_spec.has_negative_class()) {
+      std::mt19937 task_bit_gen(HashMix(
+          static_cast<RandomSeedT>(856572777), data_seed));
+      RandomGenerator task_gen(&task_bit_gen);
+
+      std::set<std::pair<IntegerT, IntegerT>> held_out_pairs_set;
+      for (const ClassPair& class_pair : task_spec.held_out_pairs()) {
+        held_out_pairs_set.insert(std::pair<IntegerT, IntegerT>(
+            std::min(class_pair.positive_class(),
+                     class_pair.negative_class()),
+            std::max(class_pair.positive_class(),
+                     class_pair.negative_class())));
+      }
+
+      std::vector<std::pair<IntegerT, IntegerT>> search_pairs;
+      // Assumming the classes are in [0, 10).
+      for (IntegerT i = 0; i < 10; i++) {
+        for (IntegerT j = i+1; j < 10; j++){
+          std::pair<IntegerT, IntegerT> class_pair(i, j);
+          // Collect all the pairs that is not held out.
+          if (held_out_pairs_set.count(class_pair) == 0)
+            search_pairs.push_back(class_pair);
+        }
+      }
+
+      CHECK(!search_pairs.empty())
+          << "All the pairs are held out!" << std::endl;
+
+      std::pair<IntegerT, IntegerT> selected_pair =
+          search_pairs[task_gen.UniformInteger(0, (search_pairs.size()))];
+      positive_class = selected_pair.first;
+      negative_class = selected_pair.second;
+      data_seed = static_cast<RandomSeedT>(
+          task_gen.UniformInteger(
+              task_spec.min_supported_data_seed(),
+              task_spec.max_supported_data_seed()));
+    } else {
+      LOG(FATAL) << ("You should either provide both or none of the positive"
+                     " and negative classes.") << std::endl;
+    }
+
+    // Generate the key using the task_spec.
+    std::string filename = absl::StrCat(
+        "binary_", task_spec.dataset_name(), "-pos_",
+        positive_class, "-neg_", negative_class,
+        "-dim_", features_size, "-seed_", data_seed);
+
+    std::string full_path = path + "/" + filename;
+    ScalarLabelDataset saved_dataset;
+    std::ifstream is(full_path, std::ifstream::binary);
+    CHECK(is.good()) << "No data found at " << full_path
+        << (". Please follow the README to generate "
+            "the projected binary datasets first.") << std::endl;
+    if (is.good()) {
+      std::string read_buffer((std::istreambuf_iterator<char>(is)),
+                              std::istreambuf_iterator<char>());
+      CHECK(saved_dataset.ParseFromString(read_buffer))
+          << "Error while parsing the proto from "
+          << full_path << std::endl;
+      is.close();
+    }
+
+    // Check there is enough data saved in the sstable.
+    CHECK_GE(saved_dataset.train_features_size(),
+             buffer->train_features_.size())
+        << "Not enough training examples in " << full_path << std::endl;
+    CHECK_GE(saved_dataset.train_labels_size(),
+             buffer->train_labels_.size())
+         << "Not enough training labels in " << full_path << std::endl;
+    CHECK_EQ(features_size,
+             saved_dataset.train_features(0).features_size())
+        << "Incorrect feature size in " << full_path << std::endl;
+
+    for (IntegerT k = 0; k < buffer->train_features_.size(); ++k)  {
+      for (IntegerT i_dim = 0; i_dim < F; ++i_dim) {
+       buffer->train_features_[k][i_dim] =
+           saved_dataset.train_features(k).features(i_dim);
+      }
+      buffer->train_labels_[k] =
+           saved_dataset.train_labels(k);
+    }
+
+    CHECK_GE(saved_dataset.valid_features_size(),
+             buffer->valid_features_.size());
+    CHECK_GE(saved_dataset.valid_labels_size(),
+             buffer->valid_labels_.size());
+    for (IntegerT k = 0; k < buffer->valid_features_.size(); ++k)  {
+      for (IntegerT i_dim = 0; i_dim < F; ++i_dim) {
+       buffer->valid_features_[k][i_dim] =
+           saved_dataset.valid_features(k).features(i_dim);
+      }
+      buffer->valid_labels_[k] =
+           saved_dataset.valid_labels(k);
+    }
+
+    CHECK(eval_type == ACCURACY);
+  }
+};
+
 // Creates a task using the linear regressor with fixed weights. The
 // weights are determined by the seed. Serves as a way to initialize the
 // task.
@@ -134,9 +260,9 @@ struct ScalarLinearRegressionTaskCreator {
                      RandomSeedT data_seed, TaskBuffer<F>* buffer) {
     ClearAndResize(num_train_examples, num_valid_examples, buffer);
     std::mt19937 data_bit_gen(data_seed + 939723201);
-    RandomGenerator data_gen = RandomGenerator(&data_bit_gen);
+    RandomGenerator data_gen(&data_bit_gen);
     std::mt19937 param_bit_gen(param_seed + 997958712);
-    RandomGenerator weights_gen = RandomGenerator(&param_bit_gen);
+    RandomGenerator weights_gen(&param_bit_gen);
     Generator generator(NO_OP_ALGORITHM, 0, 0, 0, {}, {}, {}, nullptr,
                         nullptr);
 
@@ -171,9 +297,9 @@ struct Scalar2LayerNnRegressionTaskCreator {
                      RandomSeedT data_seed, TaskBuffer<F>* buffer) {
     ClearAndResize(num_train_examples, num_valid_examples, buffer);
     std::mt19937 data_bit_gen(data_seed + 865546086);
-    RandomGenerator data_gen = RandomGenerator(&data_bit_gen);
+    RandomGenerator data_gen(&data_bit_gen);
     std::mt19937 param_bit_gen(param_seed + 174299604);
-    RandomGenerator weights_gen = RandomGenerator(&param_bit_gen);
+    RandomGenerator weights_gen(&param_bit_gen);
     Generator generator(NO_OP_ALGORITHM, 0, 0, 0, {}, {}, {}, nullptr,
                         nullptr);
 
@@ -217,136 +343,14 @@ struct Scalar2LayerNnRegressionTaskCreator {
   }
 };
 
-// TODO(crazydonkey): make this function more readable.
-template <FeatureIndexT F>
-struct ProjectedBinaryClassificationTaskCreator {
-  static void Create(EvalType eval_type,
-                     const ProjectedBinaryClassificationTask& task_spec,
-                     IntegerT num_train_examples, IntegerT num_valid_examples,
-                     IntegerT features_size, RandomSeedT data_seed,
-                     TaskBuffer<F>* buffer) {
-    ClearAndResize(num_train_examples, num_valid_examples, buffer);
-
-    std::string dump_path;
-    CHECK(task_spec.has_dump_path() & !task_spec.dump_path().empty())
-        << "You have to specifiy the path to the data!" << std::endl;
-    dump_path = task_spec.dump_path();
-
-    std::unique_ptr<SSTable> sstable(
-        SSTable::Open(
-            dump_path,
-            SSTable::ON_DISK()));
-
-    IntegerT positive_class;
-    IntegerT negative_class;
-
-    if (task_spec.has_positive_class() &&
-        task_spec.has_negative_class()) {
-      positive_class = task_spec.positive_class();
-      negative_class = task_spec.negative_class();
-      IntegerT num_supported_data_seeds =
-          task_spec.max_supported_data_seed() -
-          task_spec.min_supported_data_seed();
-      data_seed = static_cast<RandomSeedT>(
-          task_spec.min_supported_data_seed() +
-          data_seed % num_supported_data_seeds);
-    } else if (!task_spec.has_positive_class() &&
-               !task_spec.has_negative_class()) {
-      std::mt19937 task_bit_gen(HashMix(
-          static_cast<RandomSeedT>(856572777), data_seed));
-      RandomGenerator task_gen = RandomGenerator(&task_bit_gen);
-
-      std::set<std::pair<IntegerT, IntegerT>> held_out_pairs_set;
-      for (ClassPair class_pair : task_spec.held_out_pairs()) {
-        held_out_pairs_set.insert(std::pair<IntegerT, IntegerT>(
-            std::min(class_pair.positive_class(),
-                     class_pair.negative_class()),
-            std::max(class_pair.positive_class(),
-                     class_pair.negative_class())));
-      }
-
-      std::vector<std::pair<IntegerT, IntegerT>> search_pairs;
-      // Assumming the classes are in [0, 10).
-      for (IntegerT i = 0; i < 10; i++) {
-        for (IntegerT j = i+1; j < 10; j++){
-          std::pair<IntegerT, IntegerT> class_pair(i, j);
-          // Collect all the pairs that is not held out.
-          if (held_out_pairs_set.count(class_pair) == 0)
-            search_pairs.push_back(class_pair);
-        }
-      }
-
-      CHECK(!search_pairs.empty())
-          << "All the pairs are held out!" << std::endl;
-
-      std::pair<IntegerT, IntegerT> selected_pair =
-          search_pairs[task_gen.UniformInteger(0, (search_pairs.size()))];
-      positive_class = selected_pair.first;
-      negative_class = selected_pair.second;
-      data_seed = static_cast<RandomSeedT>(
-          task_gen.UniformInteger(
-              task_spec.min_supported_data_seed(),
-              task_spec.max_supported_data_seed()));
-    } else {
-      LOG(FATAL) << ("You should either provide both or none of the positive"
-                     " and negative classes.") << std::endl;
-    }
-
-    // Generate the key using the task_spec.
-    std::string key = absl::StrCat(task_spec.dataset_name(), "-pos_",
-                                   positive_class, "-neg_", negative_class,
-                                   "-dim_", features_size, "-seed_", data_seed);
-
-    // Create SSTable::Iterator object and Seek() to the search term in the
-    // SSTable.
-    std::unique_ptr<SSTable::Iterator> iter(sstable->GetIterator());
-    iter->Seek(key);
-    ProjectedBinaryClassificationTask saved_task;
-    while (!iter->done() && (iter->key() == key)) {
-      CHECK(saved_task.ParseFromString(iter->value())) << iter->key();
-      iter->Next();
-    }
-
-    // Check there is enough data saved in the sstable.
-    CHECK_GE(saved_task.dumped_task().train_features_size(),
-             buffer->train_features_.size());
-    CHECK_GE(saved_task.dumped_task().train_labels_size(),
-             buffer->train_labels_.size());
-
-    for (IntegerT k = 0; k < buffer->train_features_.size(); ++k)  {
-      for (IntegerT i_dim = 0; i_dim < F; ++i_dim) {
-       buffer->train_features_[k][i_dim] =
-           saved_task.dumped_task().train_features(k).features(i_dim);
-      }
-      buffer->train_labels_[k] =
-           saved_task.dumped_task().train_labels(k);
-    }
-
-    CHECK_GE(saved_task.dumped_task().valid_features_size(),
-             buffer->valid_features_.size());
-    CHECK_GE(saved_task.dumped_task().valid_labels_size(),
-             buffer->valid_labels_.size());
-    for (IntegerT k = 0; k < buffer->valid_features_.size(); ++k)  {
-      for (IntegerT i_dim = 0; i_dim < F; ++i_dim) {
-       buffer->valid_features_[k][i_dim] =
-           saved_task.dumped_task().valid_features(k).features(i_dim);
-      }
-      buffer->valid_labels_[k] =
-           saved_task.dumped_task().valid_labels(k);
-    }
-
-    CHECK(eval_type == ACCURACY);
-  }
-};
-
 template<FeatureIndexT F>
 void CopyUnitTestFixedTaskVector(
-    const proto2::RepeatedField<double>& src, Scalar* dest) {
+    const google::protobuf::RepeatedField<double>& src, Scalar* dest) {
   LOG(FATAL) << "Not allowed." << std::endl;
 }
 template<FeatureIndexT F>
 void CopyUnitTestFixedTaskVector(
-    const proto2::RepeatedField<double>& src, Vector<F>* dest) {
+    const google::protobuf::RepeatedField<double>& src, Vector<F>* dest) {
   CHECK_EQ(src.size(), F);
   for (IntegerT index = 0; index < F; ++index) {
     (*dest)(index) = src.at(index);
@@ -475,6 +479,13 @@ std::unique_ptr<Task<F>> CreateTask(const IntegerT task_index,
   CHECK_GT(task_spec.num_valid_examples(), 0);
   TaskBuffer<F> buffer;
   switch (task_spec.task_type_case()) {
+    case (TaskSpec::kProjectedBinaryClassificationTask):
+      ProjectedBinaryClassificationTaskCreator<F>::Create(
+          task_spec.eval_type(),
+          task_spec.projected_binary_classification_task(),
+          task_spec.num_train_examples(), task_spec.num_valid_examples(),
+          task_spec.features_size(), data_seed, &buffer);
+      break;
     case (TaskSpec::kScalarLinearRegressionTask):
       ScalarLinearRegressionTaskCreator<F>::Create(
           task_spec.eval_type(), task_spec.num_train_examples(),
@@ -484,13 +495,6 @@ std::unique_ptr<Task<F>> CreateTask(const IntegerT task_index,
       Scalar2LayerNnRegressionTaskCreator<F>::Create(
           task_spec.eval_type(), task_spec.num_train_examples(),
           task_spec.num_valid_examples(), param_seed, data_seed, &buffer);
-      break;
-    case (TaskSpec::kProjectedBinaryClassificationTask):
-      ProjectedBinaryClassificationTaskCreator<F>::Create(
-          task_spec.eval_type(),
-          task_spec.projected_binary_classification_task(),
-          task_spec.num_train_examples(), task_spec.num_valid_examples(),
-          task_spec.features_size(), data_seed, &buffer);
       break;
     case (TaskSpec::kUnitTestFixedTask):
       UnitTestFixedTaskCreator<F>::Create(
@@ -534,10 +538,9 @@ std::unique_ptr<Task<F>> CreateTask(const IntegerT task_index,
 
 // Randomizes all the seeds given a base seed. See "internal workflow" comment
 // in task.proto.
-// TODO(crazydonkey): make sure the random seed is never 0.
 void RandomizeTaskSeeds(TaskCollection* task_collection,
                         RandomSeedT seed);
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_TASK_UTIL_H_
+#endif  // TASK_UTIL_H_

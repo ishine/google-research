@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_TRAIN_BUDGET_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_TRAIN_BUDGET_H_
+#ifndef TRAIN_BUDGET_H_
+#define TRAIN_BUDGET_H_
 
 #include "generator.h"
 #include "instruction.h"
-#include "train_budget.proto.h"
+#include "train_budget.pb.h"
 
 namespace automl_zero {
 
@@ -61,4 +61,4 @@ std::unique_ptr<TrainBudget> BuildTrainBudget(
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_TRAIN_BUDGET_H_
+#endif  // TRAIN_BUDGET_H_

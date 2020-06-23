@@ -14,7 +14,6 @@
 # limitations under the License.
 
 """DNN model with fully connected layers on raw data."""
-
 from kws_streaming.layers import dataframe
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.stream import Stream
@@ -26,13 +25,13 @@ def model_parameters(parser_nn):
   parser_nn.add_argument(
       '--units1',
       type=str,
-      default='32',
+      default='64,128',
       help='List of units in the first set of hidden layers',
   )
   parser_nn.add_argument(
       '--act1',
       type=str,
-      default="'relu'",
+      default="'relu','relu'",
       help='List of activation functions of the first set hidden layers',
   )
   parser_nn.add_argument(
@@ -56,13 +55,13 @@ def model_parameters(parser_nn):
   parser_nn.add_argument(
       '--units2',
       type=str,
-      default='256,256',
+      default='128,256',
       help='List of units in the second set of hidden layers',
   )
   parser_nn.add_argument(
       '--act2',
       type=str,
-      default="'relu','relu'",
+      default="'linear','relu'",
       help='List of activation functions of the second set of hidden layers',
   )
 
@@ -79,6 +78,9 @@ def model(flags):
   Returns:
     Keras model for training
   """
+
+  if flags.preprocess != 'raw':
+    ValueError('input audio has to be raw, but get ', flags.preprocess)
 
   input_audio = tf.keras.layers.Input(
       shape=(flags.desired_samples,), batch_size=flags.batch_size)

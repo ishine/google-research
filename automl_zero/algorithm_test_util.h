@@ -14,12 +14,12 @@
 
 // Tools to test code that moves Algorithms around.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_ALGORITHM_TEST_UTIL_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_ALGORITHM_TEST_UTIL_H_
+#ifndef ALGORITHM_TEST_UTIL_H_
+#define ALGORITHM_TEST_UTIL_H_
 
 #include "algorithm.h"
-#include "algorithm.proto.h"
-#include "testing/base/public/gmock.h"
+#include "algorithm.pb.h"
+#include "gmock/gmock.h"
 
 namespace automl_zero {
 
@@ -105,4 +105,4 @@ IntegerT MissingDataInComponentFunction(
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_ALGORITHM_TEST_UTIL_H_
+#endif  // ALGORITHM_TEST_UTIL_H_

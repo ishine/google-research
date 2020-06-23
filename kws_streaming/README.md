@@ -1,23 +1,54 @@
-# Streaming Aware Keyword Spotting Models
+# Streaming Aware neural network models
 ======================================================================================
 
-Streaming aware neural network models are important for real time response,
-high accuracy and good user experience. In this work we explore latency and
-accuracy of keyword spotting (KWS) models in the streaming and non streaming modes
-on mobile phone.
+Summary about this work is presented at paper [Streaming keyword spotting on mobile devices](https://arxiv.org/abs/2005.06720)
 
-## Overall design
+Streaming aware neural network models are important for real time response,
+high accuracy and good user experience. In this work we designed keras streaming
+wrappers and streaming aware layers. By streaming we mean streaming inference,
+where model receives portion of the input sequence (for example 20ms of audio),
+process it incrementally and return an output(for example classification result).
+Non streaming means that model has to receive the whole sequence
+(for example 1 sec) and then return an output.
+We applied this lib for keyword spotting (KWS) problem
+and implemented most popular KWS models:
+* [dnn](https://arxiv.org/pdf/1711.07128.pdf) - deep neural network based on combination of fully connected layers;
+* dnn_raw - an example of [dnn](https://arxiv.org/pdf/1711.07128.pdf) model on raw audio features;
+* [gru](https://arxiv.org/pdf/1711.07128.pdf) - gated recurrent unit model;
+* [lstm](https://arxiv.org/pdf/1711.07128.pdf) - long short term memory model;
+* [cnn](https://arxiv.org/pdf/1711.07128.pdf) - convolutional neural network;
+* [tc_resnet](https://arxiv.org/pdf/1904.03814.pdf) - temporal convolution with sequence of residual blocks;
+* [crnn](https://arxiv.org/pdf/1711.07128.pdf) - combination of convolutional layers with RNNs(GRU or LSTM);
+* [ds_cnn](https://arxiv.org/pdf/1711.07128.pdf) - depth wise convolutional neural network;
+* [svdf](https://arxiv.org/pdf/1812.02802.pdf) - singular value decomposition filter neural network (sequence of 1d depthwise conv and 1x1 conv);
+* svdf_resnet - [svdf](https://arxiv.org/pdf/1812.02802.pdf) neural network with residual connections;
+* [att_rnn](https://arxiv.org/pdf/1808.08929.pdf) - combination of attention with RNN(bi directional LSTM);
+* att_mh_rnn - extended version of [att_rnn](https://arxiv.org/pdf/1808.08929.pdf) with multihead attention;
+* [mobilenet](https://arxiv.org/abs/1704.04861) - reduced version of mobilenet vision/imagenet model, but with 1d temporal conv;
+* [mobilenet_v2](https://arxiv.org/abs/1801.04381) - reduced version of mobilenet_v2 vision/imagenet model, but with 1d temporal conv;
+* [xception](https://arxiv.org/abs/1610.02357) - reduced version of xception vision/imagenet model;
+* [inception](http://arxiv.org/abs/1512.00567) - reduced version of inception vision/imagenet model;
+* [inception_resnet](https://arxiv.org/abs/1602.07261) - reduced version of inception_resnet vision/imagenet model;
+
+They all use speech feature extractor, which is easy to configure as MFCC, LFBE
+or raw features (so user can train own speech feature extractor).
+We explored latency and accuracy of the streaming and non streaming models
+on mobile phone and demonstrated that models outperform previously reported accuracy on public data sets.
+This lib also can be applied on other sequence problems
+such as speech noise reduction, sound detection, text classification...
+
+## Experimentation steps
 NN model conversion from non streaming mode (which is frequently
 used during training) to streaming can require manual model rewriting.
-We address this by designing a Keras based library which allows automatic conversion
-of non streaming models to streaming one with no or minimum efforts.
-We achieve this in several steps:
+We address this by designing a Keras based library which allows
+automatic conversion of non streaming models to streaming one with no
+or minimum efforts. We achieve this in several steps:
 
 1. Train model using non streaming TensorFlow (TF) graph representation.
-2. Convert model to streaming and non streaming inference modes.
+2. Automatically convert model to streaming and non streaming inference modes.
 Conversion to streaming inference mode includes TF/Keras graph traversal and
 buffer insertion for the layers which have to be streamed.
-3. Convert Keras model to TensorFlow Lite (TFLite)
+3. Convert Keras model to TensorFlow Lite (TFLite) and quantize if needed.
 4. Run TFLite inference on phone.
 
 We build this library with the speech feature extractor being a part of the model
@@ -25,18 +56,77 @@ and also part of the model conversion to inference mode with TFLite.
 It allows to simplify model testing on mobile devices: the developer can simply pass
 audio data into the model and receive classification results.
 
+We built streaming wrapper for layers (such as conv,flatten) and
+streaming aware layers (for GRU and LSTM).
+It allows us to design Keras models, train them and automatically convert them
+to streaming mode.
 
-We build streaming wrapper for layers and streaming aware layers.
-It allows us to design Keras models, train them and automatically
-convert them to streaming mode.
-By streaming we mean streaming inference, where model processing every 20ms of audio
-and return classification result.
-Non streaming means that model has to receive the whole sequence (1 sec) and then return classification result.
+## Experimental results
 
-## Inference 
+All experiments are listed in folder "experiments". It contains:
+* kws_experiments_paper - experiments presented in [paper](https://arxiv.org/abs/2005.06720)
+* kws_experiments_q - quantized model presented in [paper](https://arxiv.org/abs/2005.06720)
+* kws_experiments_30k - models with 30k parameters.
+
+### Streamable and non streamable models
+
+Below we plot performance of models from kws_experiments_paper, kws_experiments_q and kws_experiments_30k. It is only a subset of the models with selected parameters. In the graphs below, model size is a size of TFLite module including both speech feature extractor and neural network.
+
+* Accuracy/Latency[ms]. Latency of processing the whole 1sec audio.
+
+![alt text](accuracy_latency.png)
+
+* Accuracy/Model size[KB].
+
+![alt text](accuracy_size.png)
+
+* Latency[ms]/Model size[KB].
+
+![alt text](latency_size.png)
+
+
+### Streaming models
+
+* Accuracy/Latency[ms]. Latency of processing 20ms audio packet (in streaming mode).
+
+![alt text](accuracy_latency_stream.png)
+
+* Accuracy/Model size[KB].
+
+![alt text](accuracy_size_stream.png)
+
+
+
+## Migration to Streaming Aware neural network models
+For migration of existing keras model to streaming one, developer need to
+replace RNNs by streaming aware RNNs. Streaming aware LSTM and GRU of this lib
+are fully compatible with keras api.
+Remaining layers, which are doing data processing in time dimension,
+has to be wrapped by Stream wrapper, as it is shown below:
+
+Standard keras model:
+```
+output = tf.keras.layers.Conv2D(...)(input)
+output = tf.keras.layers.Flatten(...)(output)
+output = tf.keras.layers.Dense(...)(output)
+```
+
+Streaming aware model:
+```
+output = Stream(cell=tf.keras.layers.Conv2D(...))(input)
+output = Stream(cell=tf.keras.layers.Flatten(...))(output)
+output = tf.keras.layers.Dense(...)(output)
+```
+
+### Current limitation:
+Some models are not supported in streaming mode:
+* Bidirectional RNN kind of models such as att_rnn, att_mh_rnn require access to the whole sequence.
+* Pooling and striding in time dimension is not supported in streaming mode. So models such as mobilenet, mobilenet_v2, xception, inception, inception_resnet, tc_resnet are not streamable in this library now. It is only a design decision and can be enabled in the future.
+
+## Inference
 KWS model in streaming mode is executed by steps:
 
-1. Receive sample(packet) of audio data from microphone
+1. Receive sample(packet), for example audio data from microphone.
 2. Feed these data into KWS model
 3. Process these data and return detection output
 4. Go to next inference iteration to step 1 above.
@@ -68,9 +158,10 @@ A stateful model can be implemented using stateless graph (above example 2.)
 because some inference engines do not support updates
 of the internal buffer variables.
 
-We implemented stateful KWS models with internal state, such models receive
-input speech data and return classification results.
-We also implemented stateful KWS models with external state, such models
+This lib allow us to do several types of conversions:
+1. Non streaming model to stateful KWS models with internal state,
+such models receive input speech data and return classification results.
+2. Non streaming model to stateful KWS models with external state, such models
 receive input speech data and all states buffers required for model's layers
 and return classification results with updated states buffers.
 
@@ -103,10 +194,10 @@ Inference graph is stateless, so that graph has not internal state.
 All states are received as inputs and after update are returned as output state
 
 ### Further information
-A paper about this work is work in progress.
+Summary about this work is presented at paper [Streaming keyword spotting on mobile devices](https://arxiv.org/abs/2005.06720)
 All experiments on KWS models presented in this paper can be reproduced by
 following the steps described in
-`kws_streaming/experiments/kws_experiments.txt`.
+`kws_streaming/experiments/kws_experiments_paper.txt`.
 Models were trained on a desktop (Ubuntu) and tested on a Pixel4 phone.
 
 
@@ -147,6 +238,8 @@ tar -xf ./speech_commands_v0.02.tar.gz
 cd ../
 ```
 
+We would suggest to explore training, validation and testing data
+in colab 'kws_streaming/colab/check-data.ipynb'
 
 ### Set up models:
 
@@ -226,6 +319,47 @@ dnn \
 --act2 "'linear','relu'"
 ```
 
+### Re-train dnn model from scratch with quantization on data set V1 and run evaluation:
+
+By default we use mfcc_tf option to specify speech feature extractor.
+It is based on DFT and DCT, where DFT and DCT are implemented with matrix matrix multiplications. This approach is compatible with any inference engine, but it can increase model size significantly. Post quantization of such model
+can reduce its accuracy.
+That is why we also introduced mfcc_op option. In this case speech
+feature extractor is based on TFLite custom operations. This kind of feature extractor
+functionally is the same with mfcc_tf, but all DFT, DCT are executed using FFT,
+so it will be faster and model size will be defined by neural net only.
+If you specify --feature_type 'mfcc_op', then model will be trained and
+evaluated in unquantized and quantized form (only post training quantization is supported). With mfcc_op we observed insignificant accuracy reduction of quantized models.
+
+
+
+```shell
+python -m kws_streaming.train.model_train_eval \
+--data_url '' \
+--data_dir ./data1/ \
+--train_dir ./models1/dnn_1/ \
+--mel_upper_edge_hertz 7000 \
+--how_many_training_steps 100,100,100 \
+--learning_rate 0.0005,0.0001,0.00002 \
+--window_size_ms 40.0 \
+--window_stride_ms 20.0 \
+--mel_num_bins 40 \
+--dct_num_features 20 \
+--resample 0.15 \
+--feature_type 'mfcc_op' \
+--alsologtostderr \
+--train 1 \
+dnn \
+--units1 '64,128' \
+--act1 "'relu','relu'" \
+--pool_size 2 \
+--strides 2 \
+--dropout1 0.1 \
+--units2 '128,256' \
+--act2 "'linear','relu'"
+```
+
+
 Some key flags are described below:
 
 * set `"--train 0"` to run only model evaluation
@@ -241,8 +375,28 @@ If you interested to train or evaluate models on data sets V2 just set:
 * set `--train_dir ./models2/dnn/` to avoid overwriting previous results.
 
 
+### Speech feature extraction configs:
+
+Model can be trained with different feature extractors including raw audio. An example of model training on raw audio is presented at models/dnn_raw.py (in this case speech feature extractor will be learned). In models/dnn_raw.py, model does not have speech feature extractor so 'feature_type' will be ignored. All other models have speech feature extractor as a part of the model which can be configured by feature_type: 'mfcc_tf', 'mfcc_op' (in this case 'preprocess' has to be 'raw', so that model receives raw audio and then apply speech feature extractor 'mfcc_tf' or 'mfcc_op'). If you specify 'preprocess' equal 'mfcc' or 'micro', then speech feature extraction is done outside of the model during audio preprocessing (in this case model does not have internal feature extractor and 'feature_type' will be ignored; model receives speech features as input).
+
+This lib supports TFlite speech feature extractors for different hardware: desktop, mobile phone and microcontrollers.
+
+There are several options to run a model on desktop and mobile phone. These options with properties are described below table:
+
+
+|                  | preprocess 'raw'; <br> feature_type 'mfcc_tf'  | preprocess 'raw'; <br> feature_type 'mfcc_op'  | preprocess 'mfcc'; <br> feature_type is ignored     | preprocess 'micro'; <br> feature_type is ignored    |
+| ---------------- | --------------------- | --------------------- | ------------------- | ------------------- |
+|**Speech feature <br> extractor:**| part of model      | part of model      |  not part of model|  not part of model|
+|**Speech feature <br> based on:**| DFT, DFT weights <br> are part of model  |   FFT     |    FFT    |     FFT         |
+|**Model size:**   |   DFT weights + model weights         |      model weights          |        model weights      |         model weights     |
+|**Quantization:** |    not implemented    |      post training    |     post training   |     post training   |
+|**Can run on:**   |    desktop, <br> mobile    |      desktop, <br> mobile  |     desktop, <br> mobile |   microcontrollers  |
+
+If speech feature extractor is part of the model then it is convenient for deployment, otherwise user will have to manage speech feature extractor and data streams between model and speech feature extractor. Speech feature extractor based on DFT can be a good option for hardware with no FFT support. Combination of FFT with post training quantization can reduce latency by 2x.
+
+
 ### Training on custom data
-If you want to train on your own data, you'll need to create .wavs with your
+If you prefer to train on your own data, you'll need to create .wavs with your
 recordings, all at a consistent length, and then arrange them into subfolders
 organized by label. For example, here's a possible file structure:
 
@@ -314,96 +468,115 @@ python -m kws_streaming.train.model_train_eval \
 dnn
 ```
 
-
-<section class="zippy">
 Description of the content of the model folder models1/dnn_1:
 
 ```
-logs > - it has training/validation logs:
-
-     train/events.out.tfevents.**.com - training loss/accuracy at every iteration
-
-     validation/events.out.tfevents.**.com - validation loss/accuracy at every iteration
-
-non_stream > - TF non streamable model stored in SavedModel format
-
-stream_state_internal > TF streaming model stored in SavedModel format
-
-tf > this folder has evaluation of tf.keras model in both streaming and non streaming modes
-
-   model_summary_non_stream.png - non streaming model graph (picture)
-
-   model_summary_non_stream.txt - non streaming model graph (txt)
-
-   model_summary_stream_state_external.png - streaming model graph with external states (picture)
-
-   model_summary_stream_state_external.txt - streaming model graph with external states (txt)
-
-   model_summary_stream_state_internal.png - streaming model graph with internal states (picture)
-
-   model_summary_stream_state_internal.txt - streaming model graph with internal states (txt)
-
-   stream_state_external_model_accuracy_sub_set_reset0.txt - accuracy of streaming model with external state
-      on subset of testing data (it is used to validate that TF and TFLite inference gives the same result).
-      Do not use these accuracy for reporting because it is computed on subset of testing data (on 1000 samples)
-      State of the model is not reseted before running inference.
-      So we can see how internal state is influencing accuracy in long run.
-
-   stream_state_external_model_accuracy_sub_set_reset1.txt - accuracy of streaming model with external state
-      on subset of testing data (it is used to validate that TF and TFLite inference gives the same result).
-      Do not use these accuracy for reporting because it is computed on subset of testing data (on 1000 samples)
-      State of the model is reseted before running inference.
-      So it is equivalent to non streaming inference (state is not kept between testing sequences).
-
-   tf_non_stream_model_accuracy.txt - accuracy of non streaming model tested with TF
-
-   tf_non_stream_model_sampling_stream_accuracy.txt - accuracy of non streaming model tested with TF
-      Input testing data are shifted randomly in range: -time_shift_ms ... time_shift_ms
-
-   tf_stream_state_internal_model_accuracy_sub_set.txt - accuracy of streaming model with internal state
-      on subset of testing data.
-      Do not use these accuracy for reporting because it is computed on subset of testing data (on 1000 samples)
-      State of the model is not reseted before running inference.
-      So we can see how internal state is influencing accuracy in long run.
-
-tflite_non_stream > - TF non streaming model is converted to TFLite and stored in this folder
-
-    non_stream.tflite - TFLite non streaming model
-
-    tflite_non_stream_model_accuracy.txt - accuracy of TFLite non streaming model
-        We report this accuracy in the paper
-
-    non_stream.tflite.benchmark - benchmark of TFLite non streaming model on mobile phone
-
-    non_stream.tflite.benchmark.profile - profiling of TFLite non streaming model on mobile phone
-
-tflite_stream_state_external > TF streaming model with external state is converted to TFLite and stored in this folder
-
-    stream_state_external.tflite - TFLite streaming model with external state
-
-    tflite_stream_state_external_model_accuracy_reset0.txt - accuracy of TFLite streaming model with external state
-       State of the model is not reseted before running inference.
-       So we can see how internal state is influencing accuracy in long run.
-       We report this accuracy in the paper for streaming models
-
-    tflite_stream_state_external_model_accuracy_reset1.txt - accuracy of TFLite streaming model with external state
-       State of the model is reseted before running inference.
-       So it is equivalent to non streaming inference (state is not kept between testing sequences).
-
-    stream_state_external.tflite.benchmark - benchmark of TFLite streaming model with external state on mobile phone
-
-    stream_state_external.tflite.benchmark.profile - profiling of TFLite streaming model with external state on mobile phone
-
-accuracy_last.txt - accuracy at the last training iteration (used for debugging)
-
-last_weights.data - weights of the model at last training iteration (used for debugging)
-
-flags.txt - flags which were used for model training (include all model parameters settings, paths all of it)
-
-graph.pbtxt - TF non streaming model in graph representation
-
-labels.txt - list of labels used for model training
-
-best_weights.data - best model weights, these weights will be used for model evaluation with TFLite and reporting
+├── accuracy_last.txt - accuracy at the last training iteration (for debugging)
+├── best_weights.data-00000-of-00002
+├── best_weights.data-00001-of-00002
+├── best_weights.index  - best model weights, these weights are used for
+|       model evaluation with TF/TFLite for reporting
+├── flags.json - flags which were used for model training (include all model parameters settings, paths all of it)
+├── flags.txt - the same as flags.json just in txt
+├── graph.pbtxt - TF graph non streaming model representation
+├── labels.txt - list of labels used for model training
+├── last_weights.data-00000-of-00002
+├── last_weights.data-00001-of-00002
+├── last_weights.index - weights of the model at last training iteration (used for debugging)
+├── logs
+│   ├── train
+│   │   └── events.out.tfevents... - tranining loss/accuracy on every minibatch
+│   └── validation
+│       └── events.out.tfevents... - validation loss/accuracy on every eval step
+├── model_summary.txt - model topology in non streaming mode
+├── non_stream - (optional)TF non streamable model stored in SavedModel format
+│   ├── assets
+│   ├── model_summary.txt
+│   ├── saved_model.pb
+│   └── variables
+│       ├── variables.data-00000-of-00002
+│       ├── variables.data-00001-of-00002
+│       └── variables.index
+├── quantize_opt_for_size_tflite_non_stream - quantized non stream TFlite model, works with options:
+|   |        (preprocess 'raw'; feature_type 'mfcc_op')
+|   |        (preprocess 'mfcc')
+|   |        (preprocess 'micro')
+│   ├── model_summary.txt
+│   ├── non_stream.tflite - quantized non streaming TFlite model
+│   └── tflite_non_stream_model_accuracy.txt  - accuracy of quantized TFlite model
+├── quantize_opt_for_size_tflite_stream_state_external - quantized streamimg TFlite model, works with options:
+|   |        (preprocess 'raw'; feature_type 'mfcc_op')
+|   |        (preprocess 'mfcc')
+|   |        (preprocess 'micro')
+|   |        Not all models can be streamed (check models desription above)
+│   ├── model_summary.txt - model topology in streaming mode with external state
+│   ├── stream_state_external.tflite - quantized streaming TFlite model
+│   ├── tflite_stream_state_external_model_accuracy_reset0.txt - accuracy of TFLite streaming model
+|   |       with external state
+|   |       State of the model is not reseted before running inference.
+|   |       So we can see how internal state is influencing accuracy in long run.
+|   |       We report this accuracy in the paper for streaming models
+│   └── tflite_stream_state_external_model_accuracy_reset1.txt - accuracy of TFLite streaming model with external
+|            state. State of the model is reseted before running inference.
+|            So it is equivalent to non streaming inference (state is not kept between testing sequences).
+├── stream_state_internal - (optional)TF streaming model stored in SavedModel format
+│   ├── assets
+│   ├── model_summary.txt - model topology in streaming mode with internal state
+│   ├── saved_model.pb
+│   └── variables
+│       ├── variables.data-00000-of-00002
+│       ├── variables.data-00001-of-00002
+│       └── variables.index
+├── tf - evaluation of tf float model in both streaming and non streaming modes
+│   ├── model_summary_non_stream.png - non streaming model graph (picture)
+│   ├── model_summary_non_stream.txt - - non streaming model graph (txt)
+│   ├── model_summary_stream_state_external.png - streaming model graph with external states (picture)
+│   ├── model_summary_stream_state_external.txt - streaming model graph with external states (txt)
+│   ├── model_summary_stream_state_internal.png - streaming model graph with internal states (picture)
+│   ├── model_summary_stream_state_internal.txt - streaming model graph with internal states (txt)
+│   ├── stream_state_external_model_accuracy_sub_set_reset0.txt - accuracy of streaming model with external state
+|   |       on subset of testing data (it is used to validate that TF and TFLite inference gives the same result).
+|   |       Do not use this accuracy for reporting because it is computed 
+|   |       on subset of testing data (on 1000 samples)
+|   |       State of the model is not reseted before running inference.
+|   |       So we can see how internal state is influencing accuracy in long run.
+│   ├── stream_state_external_model_accuracy_sub_set_reset1.txt - accuracy of streaming model with external state
+|   |       on subset of testing data (it is used to validate that TF and TFLite inference gives the same result).
+|   |       Do not use this accuracy for reporting because it is computed 
+|   |       on subset of testing data (on 1000 samples)
+|   |       State of the model is reseted before running inference.
+|   |       So it is equivalent to non streaming inference (state is not kept between testing sequences).
+│   ├── tf_non_stream_model_accuracy.txt - accuracy of non streaming model tested with TF
+│   ├── tf_non_stream_model_sampling_stream_accuracy.txt - accuracy of non streaming model tested with TF
+|   |       Input testing data are shifted randomly in range: -time_shift_ms ... time_shift_ms (for debugging)
+│   └── tf_stream_state_internal_model_accuracy_sub_set.txt - accuracy of streaming model with internal state
+|           on subset of testing data.
+|           Do not use this accuracy for reporting because it is computed
+|           on subset of testing data (on 1000 samples)
+|           State of the model is not reseted before running inference.
+|           So we can see how internal state is influencing accuracy in long run.
+├── tflite_non_stream - TF non streaming model is converted to TFLite and stored here
+│   ├── model_summary.txt - model topology in non streaming mode
+│   ├── non_stream.tflite - TFLite non streaming model
+│   └── tflite_non_stream_model_accuracy.txt - accuracy of TFLite non streaming model (reported in paper)
+├── tflite_stream_state_external - TF streaming model with external state is converted to TFLite and stored here
+│   ├── model_summary.txt - model topology in streaming mode with external state
+│   ├── stream_state_external.tflite - TFLite streaming model with external state
+│   ├── tflite_stream_state_external_model_accuracy_reset0.txt - accuracy of TFLite streaming model
+|   |       with external state
+|   |       State of the model is not reseted before running inference.
+|   |       So we can see how internal state is influencing accuracy in long run.
+|   |       We report this accuracy in the paper for streaming models
+│   └── tflite_stream_state_external_model_accuracy_reset1.txt - accuracy of TFLite streaming model
+|           with external state. State of the model is reseted before running inference.
+|           So it is equivalent to non streaming inference (state is not kept between testing sequences).
+└── train - check points of tf.keras model weights after every evaluation step
+    ├── 0weights_400.data-00000-of-00002
+    ├── 0weights_400.data-00001-of-00002
+    ├── 0weights_400.index
+    ├── ...
+    ├── 9027weights_....data-00000-of-00002
+    ├── 9027weights_....data-00001-of-00002
+    ├── 9027weights_....index
+    └── checkpoint
 ```
-</section>

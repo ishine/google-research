@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_RANDOMIZER_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_RANDOMIZER_H_
+#ifndef RANDOMIZER_H_
+#define RANDOMIZER_H_
 
 #include <memory>
 #include <random>
 
 #include "definitions.h"
-#include "instruction.proto.h"
+#include "instruction.pb.h"
 
 namespace automl_zero {
 
@@ -74,4 +74,4 @@ class Randomizer {
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_RANDOMIZER_H_
+#endif  // RANDOMIZER_H_

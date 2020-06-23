@@ -22,19 +22,17 @@
 
 #include "algorithm.h"
 #include "task.h"
-#include "task.proto.h"
+#include "task.pb.h"
 #include "definitions.h"
 #include "executor.h"
 #include "generator.h"
-#include "generator_test_util.h"
 #include "memory.h"
 #include "random_generator.h"
-#include "random_generator_test_util.h"
 #include "test_util.h"
-#include "testing/base/public/gmock.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/strings/str_cat.h"
-#include "third_party/eigen3/Eigen/Core"
+#include "Eigen/Core"
 
 namespace automl_zero {
 

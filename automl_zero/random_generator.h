@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_RANDOM_GENERATOR_H_
-#define THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_RANDOM_GENERATOR_H_
+#ifndef RANDOM_GENERATOR_H_
+#define RANDOM_GENERATOR_H_
 
 #include <limits>
 #include <random>
@@ -33,7 +33,10 @@ class RandomGenerator {
   inline std::mt19937* BitGen() {return bit_gen_;}
 
   // Resets the generator with a new random seed.
-  void SetSeed(RandomSeedT seed) {bit_gen_->seed(seed);}
+  void SetSeed(RandomSeedT seed) {
+    assert(seed != 0);
+    bit_gen_->seed(seed);
+  }
 
   float GaussianFloat(float mean, float stdev);
 
@@ -92,11 +95,11 @@ class RandomGenerator {
   template<FeatureIndexT F> void FillBeta(
       double alpha, double beta, Matrix<F>* matrix);
 
- private:
-  friend RandomGenerator SimpleRandomGenerator();
-
-  // Used to create a simple class for tests in SimpleRandomGenerator().
+  // Used to create a simple class for tests in RandomGenerator().
   RandomGenerator();
+
+ private:
+  friend RandomGenerator RandomGenerator();
 
   std::unique_ptr<std::mt19937> bit_gen_owned_;
   std::mt19937* bit_gen_;
@@ -163,4 +166,4 @@ void RandomGenerator::FillBeta(
 
 }  // namespace automl_zero
 
-#endif  // THIRD_PARTY_GOOGLE_RESEARCH_GOOGLE_RESEARCH_AUTOML_ZERO_RANDOM_GENERATOR_H_
+#endif  // RANDOM_GENERATOR_H_

@@ -18,12 +18,12 @@ syntax = "proto2";
 
 package automl_zero;
 
-import "third_party/google_research/google_research/automl_zero/task.proto";
-import "third_party/google_research/google_research/automl_zero/instruction.proto";
-import "third_party/google_research/google_research/automl_zero/fec_cache.proto";
-import "third_party/google_research/google_research/automl_zero/generator.proto";
-import "third_party/google_research/google_research/automl_zero/mutator.proto";
-import "third_party/google_research/google_research/automl_zero/train_budget.proto";
+import "task.proto";
+import "instruction.proto";
+import "fec_cache.proto";
+import "generator.proto";
+import "mutator.proto";
+import "train_budget.proto";
 
 enum FitnessCombinationMode {
   UNKNOWN_FITNESS_COMBINATION = 0;
@@ -93,8 +93,13 @@ message SearchExperimentSpec {
   optional HardcodedAlgorithmID initial_population = 4
       [default = NO_OP_ALGORITHM];
 
-  // Total number of algorithms in the experiment.
-  optional int64 max_individuals = 15 [default = 1000000];
+  // Total number of train steps executed in the experiment. The default yields
+  // ~1000000 individuals each trained for 8000 steps on 10 tasks, when
+  // techniques that reduce train steps per individual, such as FEC and hurdles,
+  // are not used. Note, "~1000000 individuals" is approximate because of
+  // early stopping; however, in practice, we did not witness early stopping
+  // drastically reduce the number of individuals.
+  optional int64 max_train_steps = 15 [default = 80000000000];
 
   // The mutation types that can happen during the experiment.
   optional MutationTypeList allowed_mutation_types = 17;  // Required.
